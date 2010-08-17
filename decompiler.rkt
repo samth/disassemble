@@ -54,7 +54,7 @@
 
 (define-cstruct _native_closure_data
   ([iso _scheme_inclhash_object]
-   [code _fpointer]
+   [code _pointer]
    ;; either a void * tail_code (non-case-lambda) or mzshort * arities (case-lambda)
    [u _gcpointer]
    [arity_code _gcpointer]
@@ -78,11 +78,32 @@
   (define fp (cast f _scheme _scheme_native_closure-pointer))
   (unless (eq? 'native_closure_type (scheme_object-typetag fp))
     (error 'wrong-type))
+  (printf "keyex: ~a\n" (scheme_object-key fp))
   (match (scheme_native_closure-code fp)
     [(native_closure_data iso code u arity-code max-let-depth closure-size u2 retained)
      ;; true if not-yet jitted
      (when (ptr-equal? code on_demand_jit_code)
-       (error 'not-yet-jitted))     
-     (list iso code u arity-code max-let-depth closure-size (cast u2 _gcpointer _scheme) retained)]))
+       (error 'not-yet-jitted))
+     (let* ([case? (< closure-size 0)]
+            [closure-size (if case?
+                              (- (add1 closure-size))
+                              closure-size)]
+            [tail-code (if case? #f u)]
+            [num-arities (if case? closure-size #f)]
+            [arities (cast u _gcpointer (_cpointer _mzshort))])
+       (displayln (cast code _pointer _ulong))
+       (displayln (cast on_demand_jit_code _pointer _ulong))
+       (list 'iso iso 
+             'case? case?
+             'code code
+             'arity-code arity-code
+             'max-let-depth max-let-depth
+             'closure-size closure-size
+             'tail-code tail-code
+             'num-arities num-arities 
+             'arities arities
+             'retained retained))]))
 
 (decompile f)
+(define x (case-lambda [(x) 1] [(x y) (list x y)]))
+(decompile x)
