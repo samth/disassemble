@@ -47,7 +47,7 @@
 
 (define-cstruct _scheme_closure 
   ([so _scheme_object]
-   [code _scheme_closure_data]
+   [code _scheme_closure_data-pointer]
    [vals _scheme]))
 
 (define _scheme_closed_prim (_fun _pointer _int (_or-null _scheme_object-pointer) -> _scheme))
@@ -69,7 +69,7 @@
 
 (define-cstruct _scheme_native_closure 
   ([so _scheme_object] 
-   [code _native_closure_data]
+   [code _native_closure_data-pointer]
    [vals _scheme]))
 
 (define on_demand_jit_code (get-ffi-obj "scheme_on_demand_jit_code" #f _pointer))
