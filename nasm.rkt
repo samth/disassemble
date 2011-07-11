@@ -5,8 +5,8 @@
 ;; Taken from Larceny, written by Felix Klock
 
 ;;; Experimental library to get us semi-reliable IA32 disassembly by
-;;; delegating the job to the nasm disassembler ndisasm. 
-;;; 
+;;; delegating the job to the nasm disassembler ndisasm.
+;;;
 ;;; Note that the output can be misleading especially because we
 ;;; currently encode exception codes directly in the instruction
 ;;; stream, which the disassembler has no knowledge of. (To find this
@@ -32,7 +32,7 @@
 (define (nasm-disassemble x)
   (cond
     #;
-   ((procedure? x) 
+   ((procedure? x)
     (nasm-disassemble-procedure x))
    ((bytes? x)
     (nasm-disassemble-bytevector x))
