@@ -18,7 +18,7 @@
 
 (define _scheme_type 
   (_enum 
-   '(prim_type = 27 
+   '(prim_type = 37
      closed_prim_type
      closure_type
      case_closure_type
