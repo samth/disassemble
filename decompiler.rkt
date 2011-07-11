@@ -2,16 +2,6 @@
 
 (require racket/require racket/unsafe/ops ffi/unsafe (subtract-in '#%foreign ffi/unsafe)
          "nasm.rkt" racket/flonum) 
-#;
-(define z 100)
-#;
-(define f (let ([cnt 0]) (lambda (x y z) (set! cnt (random 100)) (* 3 x cnt z))))
-
-#;
-(length 
- (for/list ([i (in-range 100)])
-   (set! z (random 1000)) 
-   (f 1 2 4)))
 
 (define _mz_hash_key _short)
 (define _mzshort _int)
@@ -112,20 +102,5 @@
         (and env?
              (> closure-size 0)
              (typeof (ptr-ref env _scheme)))))]))
-#|
-(decompile f)
-(define x (case-lambda [(x) 1] [(x y) (list x y)]))
-(define (y [x 1] [y 2] [z 3] [w 4] [a 5] [b 6]) 1)
-(decompile x)
-(decompile y)
-|#
-#|
-(define (id x) 
-  (for/fold ([z 0.0]) ([i (in-range 100)])
-    (unsafe-fl+ x z)))
 
-(void (id 2.0))
-
-(void (decompile id))
-|#
 (provide decompile)
