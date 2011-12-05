@@ -1,5 +1,5 @@
 #lang racket
-(require racket/unsafe/ops "decompiler.rkt")
+(require racket/unsafe/ops "main.rkt")
 
 (define (f x)
   (and x
