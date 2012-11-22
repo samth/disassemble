@@ -1,10 +1,16 @@
 A disassembler for JITed functions in Racket.
 
-To use it, try something like this ('ndisasm' must be in your path):
+To install:
 
+    % raco pkg install disassemble
+
+
+To use it, try something like this (`ndisasm` must be in your path):
+
+```
 [samth@punge:~/sw/disassemble (master) plt] racket
 Welcome to Racket v5.0.99.6.
-> (enter! "decompiler.rkt")
+> (require disassemble)
 > (define (const x) 1)
 > (const 3) ;; makes sure that `const' is jitted
 1
@@ -19,8 +25,9 @@ Welcome to Racket v5.0.99.6.
 00000011  5D                pop ebp
 00000012  C3                ret
 .. much more output ..
+```
 
-Currently, `decompile' takes a #:size parameter which specifies how
+Currently, `decompile` takes a `#:size` parameter which specifies how
 many bytes to decompile, because it doesn't understand x86 code enough
 to find the end of the function.
 
