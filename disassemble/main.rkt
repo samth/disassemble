@@ -1,7 +1,10 @@
 #lang racket
 
 (require racket/require racket/unsafe/ops ffi/unsafe (subtract-in '#%foreign ffi/unsafe)
-         "nasm.rkt" racket/flonum)
+         "nasm.rkt" racket/flonum
+         racket/file)
+
+(provide dump)
 
 (define _mz_hash_key _short)
 (define _mzshort _int)
@@ -68,6 +71,27 @@
 
 (define (typeof v) (scheme_object-typetag (cast v _pointer _scheme_object-pointer)))
 
+(define (dump f file-name #:size [size 128] [env? #f])
+  (define fp (cast f _scheme _scheme_native_closure-pointer))
+  (unless (eq? 'native_closure_type (scheme_object-typetag fp))
+    (error 'wrong-type))
+  (match (scheme_native_closure-code fp)
+    [(native_closure_data iso code u arity-code max-let-depth closure-size name retained)
+     ;; true if not-yet jitted
+     (when (ptr-equal? code on_demand_jit_code)
+       (error 'not-yet-jitted))
+     (let* ([case? (< closure-size 0)]
+            [closure-size (if case?
+                              (- (add1 closure-size))
+                              closure-size)]
+            [tail-code (if case? #f u)]
+            [num-arities (if case? closure-size #f)]
+            [arities (cast u _gcpointer (_cpointer _mzshort))]
+            [env (scheme_native_closure-vals fp)])
+       (let ((file (open-output-file file-name #:exists 'replace)))
+         (write-bytes (cast tail-code _pointer (_bytes o size)) file)
+         (close-output-port file)))]))
+
 (define (decompile f #:size [size 128] [env? #f])
   (define fp (cast f _scheme _scheme_native_closure-pointer))
   (unless (eq? 'native_closure_type (scheme_object-typetag fp))
@@ -103,4 +127,5 @@
              (> closure-size 0)
              (typeof (ptr-ref env _scheme)))))]))
 
+       
 (provide decompile)
