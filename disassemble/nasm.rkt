@@ -13,7 +13,10 @@
 ;;; in the IAssassin backend, just search for the token 'dwords'; that
 ;;; is the directive for emitting constants in Sassy.)
 
-(define command "ndisasm -b 32 ")
+(define command
+  (format "ndisasm -b ~a " (if (fixnum? (expt 2 61))
+                              64
+                              32)))
 ;(define command "x86dis -e 0 -f ")
 
 (define (nasm-disassemble-bytevector bv)
@@ -23,21 +26,21 @@
       (flush-output out)
       (close-output-port out))
     (with-output-to-string
-     (λ () (system (string-append command (path->string tempfile)))))))
+      (λ () (system (string-append command (path->string tempfile)))))))
 
 #;
 (define (nasm-disassemble-procedure p)
   (nasm-disassemble-bytevector (procedure-ref p 0)))
 
-(define (nasm-disassemble x)
-  (cond
+  (define (nasm-disassemble x)
+    (cond
     #;
-   ((procedure? x)
-    (nasm-disassemble-procedure x))
-   ((bytes? x)
-    (nasm-disassemble-bytevector x))
-   (else
-    (error 'nasm-disassemble "Unknown input type ~a" x))))
+     ((procedure? x)
+     (nasm-disassemble-procedure x))
+     ((bytes? x)
+     (nasm-disassemble-bytevector x))
+     (else
+     (error 'nasm-disassemble "Unknown input type ~a" x))))
 
 (define b (bytes #x65 #x67 #x89 #x87 #x76 #x65 #x54 #x56 #x78 #x89 #x09 #x00 #x87))
 #;#;

@@ -31,6 +31,10 @@ Currently, `decompile` takes a `#:size` parameter which specifies how
 many bytes to decompile, because it doesn't understand x86 code enough
 to find the end of the function.
 
+If you have no `ndisasm`, you can `dump` function to file, and read it 
+with another disassembler (e.g. ida pro).
+`dump` function additionally takes `file-name` parameter.
+
 Patches, uses, complaints, and suggestions are all welcome.
 
 
