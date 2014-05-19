@@ -68,6 +68,8 @@
    [vals _pointer]))
 
 (define on_demand_jit_code (get-ffi-obj "scheme_on_demand_jit_code" #f _pointer))
+(define find_jit_code_end (get-ffi-obj "scheme_jit_find_code_end" #f 
+                                       (_fun _gcpointer -> _gcpointer)))
 
 (define (typeof v) (scheme_object-typetag (cast v _pointer _scheme_object-pointer)))
 
@@ -108,24 +110,30 @@
             [tail-code (if case? #f u)]
             [num-arities (if case? closure-size #f)]
             [arities (cast u _gcpointer (_cpointer _mzshort))]
-            [env (scheme_native_closure-vals fp)])
-       (display (and tail-code (nasm-disassemble (cast tail-code _pointer (_bytes o size)))))
-       #;
-       (list
-        (list 'name name
-              'iso iso
-              'case? case?
-              'code code
-              'arity-code arity-code
-              'max-let-depth max-let-depth
-              'closure-size closure-size
-              'tail-code tail-code
-              'num-arities num-arities
-              'arities arities
-              'retained retained)
-        (and env?
-             (> closure-size 0)
-             (typeof (ptr-ref env _scheme)))))]))
+            [env (scheme_native_closure-vals fp)]
+            [end (find_jit_code_end tail-code)]
+            [end (and end (cast end _gcpointer _size))]
+            [size (if end (- end
+                             (cast tail-code _gcpointer _size))
+                      size)])
+       (displayln (and tail-code (nasm-disassemble (cast tail-code _pointer (_bytes o size)))))
+       (pretty-print
+        (list
+         (hash 'name name
+               'size size
+               'iso iso
+               'case? case?
+               'code code
+               'arity-code arity-code
+               'max-let-depth max-let-depth
+               'closure-size closure-size
+               'tail-code tail-code
+               'num-arities num-arities
+               'arities arities
+               'retained retained)
+         (and env?
+              (> closure-size 0)
+              (typeof (ptr-ref env _scheme))))))]))
 
        
-(provide decompile)
+(provide decompile (rename-out [decompile disassemble]))
