@@ -4,7 +4,6 @@ To install:
 
     % raco pkg install disassemble
 
-
 To use it, try something like this (`ndisasm` must be in your path):
 
 ```
