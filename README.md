@@ -9,7 +9,7 @@ To use it, try something like this (`ndisasm` must be in your path):
 
 ```
 [samth@punge:~/sw/disassemble (master) plt] racket
-Welcome to Racket v5.0.99.6.
+Welcome to Racket v6.0.1.10.
 > (require disassemble)
 > (define (const x) 1)
 > (disassemble const)
@@ -22,8 +22,10 @@ Welcome to Racket v5.0.99.6.
 00000010  5B                pop ebx
 00000011  5D                pop ebp
 00000012  C3                ret
-.. much more output ..
+>
 ```
+
+This works only on x86, and requires a very recent version of Racket.
 
 If you have no `ndisasm`, you can `dump` function to file, and read it 
 with another disassembler (e.g. ida pro).
