@@ -12,9 +12,7 @@ To use it, try something like this (`ndisasm` must be in your path):
 Welcome to Racket v5.0.99.6.
 > (require disassemble)
 > (define (const x) 1)
-> (const 3) ;; makes sure that `const' is jitted
-1
-> (decompile const)
+> (disassemble const)
 00000000  8943FC            mov [ebx-0x4],eax
 00000003  83C3FC            add ebx,byte -0x4
 00000006  B803000000        mov eax,0x3
@@ -26,10 +24,6 @@ Welcome to Racket v5.0.99.6.
 00000012  C3                ret
 .. much more output ..
 ```
-
-Currently, `decompile` takes a `#:size` parameter which specifies how
-many bytes to decompile, because it doesn't understand x86 code enough
-to find the end of the function.
 
 If you have no `ndisasm`, you can `dump` function to file, and read it 
 with another disassembler (e.g. ida pro).
