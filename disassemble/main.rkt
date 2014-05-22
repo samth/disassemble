@@ -1,8 +1,10 @@
 #lang racket/base
 
-(require racket/match ffi/unsafe racket/lazy-require)
+(require racket/match ffi/unsafe racket/lazy-require
+         (prefix-in fc: "fcdisasm.rkt")
+         (prefix-in x86: "x86.rkt"))
 
-(lazy-require ["nasm.rkt" (nasm-disassemble)])
+(lazy-require ("nasm.rkt" [nasm-disassemble]))
 
 (provide dump disassemble (rename-out [disassemble decompile]))
 
@@ -76,8 +78,7 @@
 
 (define (typeof v) (scheme_object-typetag (cast v _pointer _scheme_object-pointer)))
 
-
-(define (go name f #:size [size #f] [env? #f])
+(define (go name f #:size [size #f])
   (unless (procedure? f)
     (raise-argument-error name "procedure" f))
   (jit-now! f)
@@ -107,9 +108,18 @@
          (error name "unable to find the end of the jitted code, and no #:size supplied"))
        (cast tail-code _pointer (_bytes o size)))]))
 
-(define (disassemble f)
+(define systype (if (fixnum? (expt 2 61)) 64 32)) ;; no 16-bit racket
+(define color #f) ;; doesn't work currently
+
+(define (disassemble f #:program [prog #f])
   (define bs (go 'disassemble f))
-  (display (nasm-disassemble bs)))
+  (case prog
+    [(nasm) (display (nasm-disassemble bs))]
+    [else
+     (fc:disassemble (open-input-bytes bs)
+                     (λ (p c) (x86:get-instruction p systype c))
+                     color #f 0 '())]))
+
 
 (define (dump f file-name)
   (define bs (go 'decompile f))
