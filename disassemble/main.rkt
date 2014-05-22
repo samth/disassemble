@@ -1,6 +1,8 @@
 #lang racket/base
 
-(require racket/match ffi/unsafe "nasm.rkt")
+(require racket/match ffi/unsafe racket/lazy-require)
+
+(lazy-require ["nasm.rkt" (nasm-disassemble)])
 
 (provide dump disassemble (rename-out [disassemble decompile]))
 
@@ -107,7 +109,7 @@
 
 (define (disassemble f)
   (define bs (go 'disassemble f))
-  (displayln (nasm-disassemble bs)))
+  (display (nasm-disassemble bs)))
 
 (define (dump f file-name)
   (define bs (go 'decompile f))

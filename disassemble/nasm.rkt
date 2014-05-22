@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require racket/file racket/port racket/system)
+(require racket/file racket/port racket/system racket/match)
 
 (provide nasm-disassemble)
 
@@ -15,8 +15,24 @@
 ;;; in the IAssassin backend, just search for the token 'dwords'; that
 ;;; is the directive for emitting constants in Sassy.)
 
-(define command
-  (format "ndisasm -b ~a " (if (fixnum? (expt 2 61)) 64 32)))
+(define nasm-path (find-executable-path "ndisasm"))
+
+(unless nasm-path
+  (error 'disassemble "unable to find the `ndisasm' executable"))
+
+(define nasm-help-text
+  (let ()
+    (define p (open-output-string))
+    (match-define (list _ in pid _ proc) (process*/ports p #f 'stdout nasm-path "-h"))
+    (proc 'wait)
+    (close-output-port in)
+    (get-output-string p)))
+
+(define systype (if (fixnum? (expt 2 61)) 64 32))
+
+(unless (regexp-match (regexp-quote (number->string systype))
+                      nasm-help-text)
+  (error 'nasm "this version of ndisasm does not support ~a-bit disassembly" systype))
 
 (define (nasm-disassemble-bytevector bv)
   (let ([tempfile (make-temporary-file "nasmtemp~a.o")])
@@ -24,8 +40,15 @@
       (write-bytes bv out)
       (flush-output out)
       (close-output-port out))
-    (with-output-to-string
-      (λ () (system (string-append command (path->string tempfile)))))))
+    (define p (open-output-string))
+    (match-define (list _ in pid _ proc)
+                  (process*/ports p #f 'stdout nasm-path "-b" 
+                                  (number->string systype)
+                                  (path->string tempfile)))
+    (proc 'wait)
+    (delete-file tempfile)
+    (close-output-port in)
+    (get-output-string p)))
 
 (define (nasm-disassemble x)
   (cond
