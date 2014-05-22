@@ -75,7 +75,7 @@
 (define (typeof v) (scheme_object-typetag (cast v _pointer _scheme_object-pointer)))
 
 
-(define (go name f #:size [size 128] [env? #f])
+(define (go name f #:size [size #f] [env? #f])
   (unless (procedure? f)
     (raise-argument-error name "procedure" f))
   (jit-now! f)
@@ -83,7 +83,7 @@
   (unless (eq? 'native_closure_type (scheme_object-typetag fp))
     (raise-argument-error name "non-primitive procedure" f))
   (match (scheme_native_closure-code fp)
-    [(native_closure_data iso code u arity-code max-let-depth closure-size name retained)
+    [(native_closure_data iso code u arity-code max-let-depth closure-size nm retained)
      (let* ([case? (< closure-size 0)]
             [closure-size (if case?
                               (- (add1 closure-size))
@@ -92,13 +92,17 @@
             [num-arities (if case? closure-size #f)]
             [arities (cast u _gcpointer (_cpointer _mzshort))]
             [env (scheme_native_closure-vals fp)]
-            [end (find_jit_code_end tail-code)]
+            [end (and tail-code (find_jit_code_end tail-code))]
             [end (and end (cast end _gcpointer _size))]
             [size (if end (- end
                              (cast tail-code _gcpointer _size))
                       size)])
+       (when case?
+         (error name "functions defined with `case-lambda' are not yet supported"))
        (unless tail-code
          (error name "unable to read jitted code"))
+       (unless (or end size)
+         (error name "unable to find the end of the jitted code, and no #:size supplied"))
        (cast tail-code _pointer (_bytes o size)))]))
 
 (define (disassemble f)
