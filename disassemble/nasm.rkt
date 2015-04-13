@@ -1,5 +1,8 @@
 #lang racket/base
 
+;; avoid test errors when nasm isn't available
+(module* test racket/base)
+
 (require racket/file racket/port racket/system racket/match)
 
 (provide nasm-disassemble)
