@@ -46,6 +46,7 @@
    [closure_map (_cpointer _mzshort)]
    [code _scheme]
    [name _scheme]
+   [tl_map _gcpointer]
    ;; more fields here for JIT
    ))
 
@@ -68,6 +69,7 @@
    ;; struct Scheme_Closure_Data *orig_code; /* For not-yet-JITted non-case-lambda */ or
    ;; Scheme_Object *name;
    [name _scheme]
+   [tl_map _gcpointer]
    ;; a void**
    [retained _gcpointer]))
 
@@ -93,7 +95,7 @@
   (unless (eq? 'native_closure_type (scheme_object-typetag fp))
     (raise-argument-error name "non-primitive procedure" f))
   (match (scheme_native_closure-code fp)
-    [(native_closure_data iso code u arity-code max-let-depth closure-size nm retained)
+    [(native_closure_data iso code u arity-code max-let-depth closure-size nm tl_map retained)
      (let* ([case? (< closure-size 0)]
             [closure-size (if case?
                               (- (add1 closure-size))
