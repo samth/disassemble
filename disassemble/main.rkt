@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require racket/match ffi/unsafe racket/lazy-require
+         version/utils
          (prefix-in fc: "fcdisasm.rkt")
          (prefix-in x86: "x86.rkt"))
 
@@ -11,9 +12,15 @@
 (define _mz_hash_key _short)
 (define _mzshort _int)
 
+;; conditionally detect this based on the Racket version
+(define prim-type-number
+  (if (version<? "6.2.1" (version))
+      39
+      38))
+
 (define _scheme_type
   (_enum
-   '(prim_type = 38
+   `(prim_type = ,prim-type-number
      closed_prim_type
      closure_type
      case_closure_type
