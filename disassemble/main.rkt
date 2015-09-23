@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require racket/match ffi/unsafe racket/lazy-require
+         version/utils
          (prefix-in fc: "fcdisasm.rkt")
          (prefix-in x86: "x86.rkt"))
 
@@ -11,9 +12,15 @@
 (define _mz_hash_key _short)
 (define _mzshort _int)
 
+;; conditionally detect this based on the Racket version
+(define prim-type-number
+  (if (version<? "6.2.1" (version))
+      39
+      38))
+
 (define _scheme_type
   (_enum
-   '(prim_type = 38
+   `(prim_type = ,prim-type-number
      closed_prim_type
      closure_type
      case_closure_type
@@ -39,6 +46,7 @@
    [closure_map (_cpointer _mzshort)]
    [code _scheme]
    [name _scheme]
+   [tl_map _gcpointer]
    ;; more fields here for JIT
    ))
 
@@ -61,6 +69,7 @@
    ;; struct Scheme_Closure_Data *orig_code; /* For not-yet-JITted non-case-lambda */ or
    ;; Scheme_Object *name;
    [name _scheme]
+   [tl_map _gcpointer]
    ;; a void**
    [retained _gcpointer]))
 
@@ -86,7 +95,7 @@
   (unless (eq? 'native_closure_type (scheme_object-typetag fp))
     (raise-argument-error name "non-primitive procedure" f))
   (match (scheme_native_closure-code fp)
-    [(native_closure_data iso code u arity-code max-let-depth closure-size nm retained)
+    [(native_closure_data iso code u arity-code max-let-depth closure-size nm tl_map retained)
      (let* ([case? (< closure-size 0)]
             [closure-size (if case?
                               (- (add1 closure-size))
