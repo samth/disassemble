@@ -19,7 +19,6 @@ env:
     # versions.
     #
     # The RELEASE snapshot is only available during the release process.
-    - RACKET_VERSION=6.0
     - RACKET_VERSION=6.1
     - RACKET_VERSION=6.1.1
     - RACKET_VERSION=6.2
