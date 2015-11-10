@@ -1,3 +1,5 @@
+![Build Status](https://api.travis-ci.org/samth/disassemble.svg])
+
 A disassembler for JITed functions in Racket.
 
 To install:
@@ -41,8 +43,7 @@ If you have `ndisasm` installed (and in your `PATH`) you can also try:
 0000001B  C3                ret
 ```
 
-This works only on x86 or x86-64, and requires a very recent version
-of Racket.
+This works only on x86 or x86-64.
 
 Also, the `dump` function writes the bytes of the machine code to a
 file:
