@@ -1,4 +1,4 @@
-![Build Status](https://api.travis-ci.org/samth/disassemble.svg)
+[![Build Status](https://api.travis-ci.org/samth/disassemble.svg)](https://travis-ci.org/samth/disassemble)
 
 A disassembler for JITed functions in Racket.
 
