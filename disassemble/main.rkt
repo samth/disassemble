@@ -14,12 +14,14 @@
 
 ;; conditionally detect this based on the Racket version
 (define prim-type-number
-  (if (version<? "6.2.1" (version))
-      39
-      38))
+  (cond [(version<=? (version) "6.2.1")
+         38]
+        [(version<? (version) "6.4.0.8")
+         39]
+        [else 40]))
 
 (define _scheme_type
-  (_enum
+  (_enum ;; from stypes.h
    `(prim_type = ,prim-type-number
      closed_prim_type
      closure_type
