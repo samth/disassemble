@@ -7,7 +7,7 @@
 
 (lazy-require ("nasm.rkt" [nasm-disassemble]))
 
-(provide dump typeof disassemble (rename-out [disassemble decompile]))
+(provide dump typeof disassemble disassemble-ffi-function (rename-out [disassemble decompile]))
 
 (define _mz_hash_key _short)
 (define _mzshort _int)
@@ -133,6 +133,14 @@
                      (λ (p c) (x86:get-instruction p systype c))
                      color #f 0 '())]))
 
+(define (disassemble-ffi-function fptr #:size s #:program [prog #f])
+  (define bs (cast fptr _pointer (_bytes o s)))
+  (case prog
+    [(nasm) (display (nasm-disassemble bs))]
+    [else
+     (fc:disassemble (open-input-bytes bs)
+                     (λ (p c) (x86:get-instruction p systype c))
+                     color #f 0 '())]))
 
 (provide get-code-bytes)
 (define (get-code-bytes f) (go 'get-code-bytes f))
