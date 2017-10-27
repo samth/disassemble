@@ -18,7 +18,15 @@
 ;;; in the IAssassin backend, just search for the token 'dwords'; that
 ;;; is the directive for emitting constants in Sassy.)
 
-(define nasm-path (find-executable-path "ndisasm"))
+(define stype (system-type))
+
+(define nasm-executable-name
+    (case stype
+      [(windows) "ndisasm.exe"]
+      [else      "ndisasm"]))
+
+(define nasm-path
+  (find-executable-path nasm-executable-name))
 
 (unless nasm-path
   (error 'disassemble "unable to find the `ndisasm' executable"))
