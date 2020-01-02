@@ -39,7 +39,7 @@
     (close-output-port in)
     (get-output-string p)))
 
-(define systype (if (fixnum? (expt 2 61)) 64 32))
+(define systype (system-type 'word))
 
 (unless (regexp-match (regexp-quote (number->string systype))
                       nasm-help-text)
