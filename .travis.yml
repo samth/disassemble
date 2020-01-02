@@ -19,11 +19,11 @@ env:
     # versions.
     #
     # The RELEASE snapshot is only available during the release process.
-    - RACKET_VERSION=6.1
-    - RACKET_VERSION=6.1.1
-    - RACKET_VERSION=6.2
-    - RACKET_VERSION=6.3
-    - RACKET_VERSION=6.4
+    
+
+
+
+    - RACKET_VERSION=7.5
     - RACKET_VERSION=HEAD
 
 # You may want to test against certain versions of Racket, without
