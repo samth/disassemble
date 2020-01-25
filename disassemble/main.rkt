@@ -163,7 +163,7 @@
      (error "unknown virtual machine")]))
 
 (define systype (system-type 'word))
-(define color #f) ;; doesn't work currently
+(define color #f)
 
 (define (disassemble f #:program [prog #f])
   (define bs (go 'disassemble f))
