@@ -1,13 +1,18 @@
 #lang racket/base
 
-(require racket/match ffi/unsafe racket/linklet racket/lazy-require
+(require racket/match ffi/unsafe racket/lazy-require
          version/utils
          (prefix-in fc: "fcdisasm.rkt")
-         (prefix-in x86: "x86.rkt"))
+         (prefix-in x86: "x86.rkt")
+         "vm.rkt")
 
 (lazy-require ("nasm.rkt" [nasm-disassemble]))
 
-(provide dump disassemble disassemble-ffi-function (rename-out [disassemble decompile]))
+(provide dump
+         disassemble
+         disassemble-ffi-function
+         disassemble-bytes
+         (rename-out [disassemble decompile]))
 
 (define go
   (case (system-type 'vm)
@@ -128,17 +133,11 @@
      (define code-pointer-adjust 1)
      (define code-prefix-words 8)   ; see `code` in "cmacro.ss"
 
-     (define eval
-       (instantiate-linklet
-        (compile-linklet '(linklet () () eval))
-        '()
-        (make-instance 'eval)))
-
-     (define inspect/object (eval 'inspect/object))
-     (define lock-object (eval 'lock-object))
-     (define unlock-object (eval 'unlock-object))
-     (define $object-address (eval '($primitive $object-address)))
-     (define foreign-ref (eval 'foreign-ref))
+     (define inspect/object (vm-primitive 'inspect/object))
+     (define lock-object (vm-primitive 'lock-object))
+     (define unlock-object (vm-primitive 'unlock-object))
+     (define $object-address (vm-eval '($primitive $object-address)))
+     (define foreign-ref (vm-primitive 'foreign-ref))
 
      (define (go name f #:size [size #f])
        (unless (procedure? f)
@@ -162,26 +161,45 @@
     [else
      (error "unknown virtual machine")]))
 
+(define extract-relocations
+  (case (system-type 'vm)
+    [(chez-scheme)
+     (define inspect/object (vm-primitive 'inspect/object))
+     (lambda (f)
+       ((((inspect/object f) 'code) 'reloc+offset) 'value))]
+    [else
+     (lambda (f) null)]))
+
 (define systype (system-type 'word))
 (define color #f)
 
 (define (disassemble f #:program [prog #f])
-  (define bs (go 'disassemble f))
-  (case prog
-    [(nasm) (display (nasm-disassemble bs))]
-    [else
-     (fc:disassemble (open-input-bytes bs)
-                     (λ (p c) (x86:get-instruction p systype c))
-                     color #f 0 '())]))
+  (disassemble-bytes (go 'disassemble f)
+                     #:program prog
+                     #:relocations (extract-relocations f)))
 
 (define (disassemble-ffi-function fptr #:size s #:program [prog #f])
-  (define bs (cast fptr _pointer (_bytes o s)))
+  (disassemble-bytes (cast fptr _pointer (_bytes o s))
+                     #:program prog))
+
+(define (disassemble-bytes bs
+                           ;; `prog` is 'nasm or #f
+                           #:program [prog #f]
+                           ;; `relocations` is (list (cons <obj> <offset>) ...)
+                           #:relocations [relocations '()])
   (case prog
     [(nasm) (display (nasm-disassemble bs))]
     [else
      (fc:disassemble (open-input-bytes bs)
                      (λ (p c) (x86:get-instruction p systype c))
-                     color #f 0 '())]))
+                     color #f 0 '()
+                     ;; Convert relocations to mutable-pair associations:
+                     (let loop ([relocations relocations])
+                       (if (null? relocations)
+                           '()
+                           (let ([p (car relocations)])
+                             (mcons (mcons (cdr p) (car p))
+                                    (loop (cdr relocations)))))))]))
 
 (provide get-code-bytes)
 (define (get-code-bytes f) (go 'get-code-bytes f))
