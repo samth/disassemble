@@ -199,7 +199,10 @@
                            '()
                            (let ([p (car relocations)])
                              (mcons (mcons (cdr p) (car p))
-                                    (loop (cdr relocations)))))))]))
+                                    (loop (cdr relocations))))))
+                     ;; recognize jump instructions:
+                     (lambda (i)
+                       (memq (mcar i) '(jmp))))]))
 
 (provide get-code-bytes)
 (define (get-code-bytes f) (go 'get-code-bytes f))
