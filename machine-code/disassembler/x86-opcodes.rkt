@@ -1,24 +1,7 @@
 ;; -*- mode: scheme; coding: utf-8 -*-
 ;; Opcode table for the Intel 80x86 processor
-;; Copyright © 2008, 2009, 2010, 2012, 2013 Göran Weinholt <goran@weinholt.se>
-
-;; Permission is hereby granted, free of charge, to any person obtaining a
-;; copy of this software and associated documentation files (the "Software"),
-;; to deal in the Software without restriction, including without limitation
-;; the rights to use, copy, modify, merge, publish, distribute, sublicense,
-;; and/or sell copies of the Software, and to permit persons to whom the
-;; Software is furnished to do so, subject to the following conditions:
-
-;; The above copyright notice and this permission notice shall be included in
-;; all copies or substantial portions of the Software.
-
-;; THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-;; IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-;; FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-;; THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-;; LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-;; FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-;; DEALINGS IN THE SOFTWARE.
+;; Copyright © 2008, 2009, 2010, 2012, 2013, 2017, 2018 Göran Weinholt <goran@weinholt.se>
+;; SPDX-License-Identifier: MIT
 #!r6rs
 
 ;;; Table syntax
@@ -110,15 +93,17 @@
 ;; For Intel AVX instructions, the opcode syntaxes K, KW, WK, B, BW,
 ;; WB, In have been used and are not official.
 
-(library (weinholt disassembler x86-opcodes)
-  (export opcodes pseudo-mnemonics mnemonic-aliases
-          lock-instructions
-          branch-hint-instructions
-          rep-instructions
-          repz-instructions
-          bnd-instructions
-          XOP-opcode-map-8 XOP-opcode-map-9 XOP-opcode-map-A)
-  (import (rnrs))
+(library (machine-code disassembler x86-opcodes)
+  (export
+    opcodes pseudo-mnemonics mnemonic-aliases
+    lock-instructions
+    branch-hint-instructions
+    rep-instructions
+    repz-instructions
+    bnd-instructions
+    XOP-opcode-map-8 XOP-opcode-map-9 XOP-opcode-map-A)
+  (import
+    (rnrs (6)))
 
   (define lock-instructions
     '(adc add and btc btr bts cmpxchg cmpxchg8b
@@ -1679,7 +1664,7 @@
        (mov Ev Gv)
        (mov Gb Eb)
        (mov Gv Ev)
-       (mov Ev Sw)
+       (mov Ew Sw)
        (lea Gv M)
        (mov Sw Ew)
        #(Group "Group 1A"               ;Three byte XOP prefix
