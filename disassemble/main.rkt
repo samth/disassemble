@@ -1,9 +1,9 @@
 #lang racket/base
 
 (require racket/match ffi/unsafe racket/lazy-require
-         version/utils
+         version/utils racket/format
+         (only-in machine-code/disassembler get-disassembler)
          (prefix-in fc: "fcdisasm.rkt")
-         (prefix-in x86: "x86.rkt")
          "vm.rkt")
 
 (lazy-require ("nasm.rkt" [nasm-disassemble]))
@@ -173,16 +173,22 @@
 (define systype (system-type 'word))
 (define color #f)
 
-(define (disassemble f #:program [prog #f])
+;; FIXME
+(define (detect-arch)
+  (string->symbol (~a "x86-" systype)))
+
+;; #f for arch is "auto-detect"
+(define (disassemble f #:program [prog #f] #:arch [arch #f])
   (disassemble-bytes (go 'disassemble f)
-                     #:program prog
+                     #:program prog #:arch arch
                      #:relocations (extract-relocations f)))
 
-(define (disassemble-ffi-function fptr #:size s #:program [prog #f])
+(define (disassemble-ffi-function fptr #:size s #:program [prog #f] #:arch [arch #f])
   (disassemble-bytes (cast fptr _pointer (_bytes o s))
                      #:program prog))
 
 (define (disassemble-bytes bs
+                           #:arch [arch #f]
                            ;; `prog` is 'nasm or #f
                            #:program [prog #f]
                            ;; `relocations` is (list (cons <obj> <offset>) ...)
@@ -191,7 +197,7 @@
     [(nasm) (display (nasm-disassemble bs))]
     [else
      (fc:disassemble (open-input-bytes bs)
-                     (λ (p c) (x86:get-instruction p systype c))
+                     (get-disassembler (or arch (detect-arch)))
                      color #f 0 '()
                      ;; Convert relocations to mutable-pair associations:
                      (let loop ([relocations relocations])
