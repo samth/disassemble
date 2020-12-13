@@ -152,7 +152,7 @@
        (define body-p (+ code-p (* code-prefix-words (ctype-sizeof _intptr))))
 
        (define bstr (make-bytes length))
-       (memcpy bstr (cast body-p _intptr _pointer) length)
+       (memcpy bstr (cast body-p _uintptr _pointer) length)
 
        (unlock-object code)
 
@@ -170,12 +170,24 @@
     [else
      (lambda (f) null)]))
 
-(define systype (system-type 'word))
 (define color #f)
 
-;; FIXME
 (define (detect-arch)
-  (string->symbol (~a "x86-" systype)))
+  (define arch (with-handlers ([exn:fail:contract?
+                                (lambda (exn)
+                                  ;; No `(system-type 'arch)` before v7.9.0.6:
+                                  (define sp (path->bytes (system-library-subpath #f)))
+                                  (cond
+                                    [(regexp-match? #rx#"i386" sp) 'i386]
+                                    [(regexp-match? #rx#"x86_64" sp) 'x86_64]
+                                    [(regexp-match? #rx#"aarch64" sp) 'aarch64]
+                                    [else sp]))])
+                 (system-type 'arch)))
+  (case arch
+    [(i386) 'x86-32]
+    [(x86_64) 'x86-64]
+    [(aarch64) 'arm-a64]
+    [else (error 'disassemble "unsupported architecture: ~s" arch)]))
 
 ;; #f for arch is "auto-detect"
 (define (disassemble f #:program [prog #f] #:arch [arch #f])
@@ -193,22 +205,39 @@
                            #:program [prog #f]
                            ;; `relocations` is (list (cons <obj> <offset>) ...)
                            #:relocations [relocations '()])
-  (case prog
-    [(nasm) (display (nasm-disassemble bs))]
-    [else
-     (fc:disassemble (open-input-bytes bs)
-                     (get-disassembler (or arch (detect-arch)))
-                     color #f 0 '()
-                     ;; Convert relocations to mutable-pair associations:
-                     (let loop ([relocations relocations])
-                       (if (null? relocations)
-                           '()
-                           (let ([p (car relocations)])
-                             (mcons (mcons (cdr p) (car p))
-                                    (loop (cdr relocations))))))
-                     ;; recognize jump instructions:
-                     (lambda (i)
-                       (memq (mcar i) '(jmp))))]))
+  (let ([arch (or arch (detect-arch))])
+    (case prog
+      [(nasm) (display (nasm-disassemble bs))]
+      [else
+       (fc:disassemble (open-input-bytes bs)
+                       (get-disassembler arch)
+                       color #f 0 '()
+                       ;; Convert relocations to mutable-pair associations:
+                       (let loop ([relocations relocations])
+                         (if (null? relocations)
+                             '()
+                             (let ([p (car relocations)])
+                               (mcons (mcons (cdr p) (car p))
+                                      (loop (cdr relocations))))))
+                       ;; recognize instruction-pointer register:
+                       (case arch
+                         [(x86-32) (lambda (x) (eq? x 'eip))]
+                         [(x86-64) (lambda (x) (eq? x 'rip))]
+                         [(arm-a64) (lambda (x) (eq? x 'pc))]
+                         [else (error "ip recognizer missing")])
+                       ;; recognize unconditional jump instructions:
+                       (case arch
+                         [(x86-32 x86-64)
+                          (lambda (i)
+                            (memq (mcar i) '(jmp)))]
+                         [(arm-a64)
+                          (lambda (i)
+                            (memq (mcar i) '(b br)))]
+                         [else (error "jump recognizer missing")])
+                       ;; implicit delta on ip-relative calculations:
+                       (case arch
+                         [(arm-a64) -4]
+                         [else 0]))])))
 
 (provide get-code-bytes)
 (define (get-code-bytes f) (go 'get-code-bytes f))
