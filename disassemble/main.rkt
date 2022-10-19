@@ -138,10 +138,13 @@
      (define unlock-object (vm-primitive 'unlock-object))
      (define $object-address (vm-eval '($primitive $object-address)))
      (define foreign-ref (vm-primitive 'foreign-ref))
+     (define extract-procedure (vm-eval '(lambda (v) (extract-procedure v #f))))
 
-     (define (go name f #:size [size #f])
-       (unless (procedure? f)
-         (raise-argument-error name "procedure" f))
+     (define (go name _f #:size [size #f])
+       (unless (procedure? _f)
+         (raise-argument-error name "procedure" _f))
+       (define f (extract-procedure _f))
+       (eprintf "~a ~a\n" f _f)
        (define f-object (inspect/object f))
        (define code-object (f-object 'code))
        (define code (code-object 'value))
@@ -164,9 +167,10 @@
 (define extract-relocations
   (case (system-type 'vm)
     [(chez-scheme)
+     (define extract-procedure (vm-eval '(lambda (v) (extract-procedure v #f))))
      (define inspect/object (vm-primitive 'inspect/object))
      (lambda (f)
-       ((((inspect/object f) 'code) 'reloc+offset) 'value))]
+       ((((inspect/object (extract-procedure f)) 'code) 'reloc+offset) 'value))]
     [else
      (lambda (f) null)]))
 
