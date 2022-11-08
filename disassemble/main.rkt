@@ -144,7 +144,6 @@
        (unless (procedure? _f)
          (raise-argument-error name "procedure" _f))
        (define f (extract-procedure _f))
-       (eprintf "~a ~a\n" f _f)
        (define f-object (inspect/object f))
        (define code-object (f-object 'code))
        (define code (code-object 'value))
