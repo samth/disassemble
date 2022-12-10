@@ -4,7 +4,7 @@
 
 (define pb-instruction-byte-size 4)
 
-
+;; PB instruction shapes. All instructions are 4 bytes in length
 ;;  -----------------------------------------------
 ;;  |    op    |    reg    |     immed/reg        |
 ;;  -----------------------------------------------
@@ -261,21 +261,12 @@
 		(cond
 			[(equal? i (bytes-length bs)) (void)]
 			[(<= (+ i pb-instruction-byte-size) (bytes-length bs))
-            #|
-				(begin 
-                    (display (format "i is: ~a" i))
-                    (display (format "first byte: ~a; last byte: ~a" (bytes-ref bs i) (bytes-ref bs (+ i 3))))
-					(display 
-						(pb-print-skeleton-instr (subbytes bs i (+ i pb-instruction-byte-size))))
-					(loop (+ i pb-instruction-byte-size)))|#
                     (begin
                         (display 
                             (disassemble (subbytes bs i (+ i pb-instruction-byte-size))))
                         (display "\n")
                         (loop (+ i pb-instruction-byte-size)))]
 			[else (error 'pb-disassemble "bad instruction format")])))
-
-; [0, 1, 2, 3, 4, 5, 6, 7]
 
 (define (pb-count-instrs bs)
 	(unless (equal? (remainder (bytes-length bs) pb-instruction-byte-size) 0)
