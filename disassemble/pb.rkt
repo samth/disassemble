@@ -82,6 +82,7 @@
 (define pb-st-group-start 184)
 (define pb-b-group-start 204)
 (define pb-b*-group-start 210)
+(define pb-nop 0)
 
 (define/enum pb-argument-types
     pb-register
@@ -311,43 +312,74 @@
 (define (format-offset off)
     (format "(offset #x~x)" off))
 
+(define (format-props props)
+    (string-join (map format-prop props)))
+
 (define (format-instr/dri op-name dest reg imm props)
-    (format "(~a ~a ~a ~a ~a)" op-name (format-reg dest) (format-reg reg) (format-imm imm 0 #f) (string-join (map format-prop props))))
+    (if (null? props)
+        (format "(~a ~a ~a ~a)" op-name (format-reg dest) (format-reg reg) (format-imm imm 0 #f))
+        (format "(~a ~a ~a ~a ~a)" op-name (format-reg dest) (format-reg reg) (format-imm imm 0 #f) (format-props props))))
 
 (define (format-instr/dir op-name dest reg imm props)
-    (format "(~a ~a ~a ~a ~a)" op-name (format-reg dest) (format-imm imm 0 #f) (format-reg reg) (string-join (map format-prop props))))
+    (if (null? props)
+        (format "(~a ~a ~a ~a)" op-name (format-reg dest) (format-imm imm 0 #f) (format-reg reg))
+        (format "(~a ~a ~a ~a ~a)" op-name (format-reg dest) (format-imm imm 0 #f) (format-reg reg) (format-props props))))
 
 (define (format-instr/di op dst imm props)
-    (format "(~a ~a ~a ~a)" 
-        op
-        (format-reg dst)
-        (format-imm imm 0 #f)
-        (string-join (map format-prop props))))
+    (if (null? props)
+        (format "(~a ~a ~a)" 
+            op
+            (format-reg dst)
+            (format-imm imm 0 #f))
+        (format "(~a ~a ~a ~a)" 
+            op
+            (format-reg dst)
+            (format-imm imm 0 #f)
+            (format-props props))))
 
 (define (format-instr/dr op dst reg props)
-    (format "(~a ~a ~a ~a)"
-        op
-        (format-reg dst)
-        (format-reg reg)
-        (string-join (map format-prop props))))
+    (if (null? props)
+        (format "(~a ~a ~a)"
+            op
+            (format-reg dst)
+            (format-reg reg))
+        (format "(~a ~a ~a ~a)"
+            op
+            (format-reg dst)
+            (format-reg reg)
+            (format-props props))))
 
 (define (format-instr/drr op dst r1 r2 props)
-    (format "(~a ~a ~a ~a ~a)"
-        op
-        (format-reg dst)
-        (format-reg r1)
-        (format-reg r2)
-        (string-join (map format-prop props))))
+    (if (null? props)
+        (format "(~a ~a ~a ~a)"
+            op
+            (format-reg dst)
+            (format-reg r1)
+            (format-reg r2))
+        (format "(~a ~a ~a ~a ~a)"
+            op
+            (format-reg dst)
+            (format-reg r1)
+            (format-reg r2)
+            (format-props props))))
 
 (define (format-instr/d op dest)
     (format "(~a ~a)"
         op
         (format-reg dest)))
 
-(define (format-instr/i op imm im-sz sgn?)
+(define (as-offset imm)
+    (s-ext imm  24))
+
+(define (format-label-imm label imm im-sz sgn?)
+    (format "(label ~a ~a)" label (format-imm imm im-sz sgn?)))
+
+(define (format-instr/i op imm label im-sz sgn?)
     (format "(~a ~a)"
-        op
-        (format-imm imm im-sz sgn?)))
+                op
+                (if (equal? label "")
+                    (format-imm imm im-sz sgn?)
+                    (format-label-imm label imm im-sz sgn?))))
 
 ; (define (format-instr/adr-dest op addr dst r1 imm)
 ;     (format "(~a ~a ~a ~a ~a)"
@@ -428,7 +460,6 @@
                     (instr-dri-reg instr)
                     (instr-dri-imm instr)
                     (list (signal sig)))]))))
-
 
 (define (decode/pb-fp-unop instr)
     (deconstruct-op (instr-op instr) pb-fp-unop-group-start
@@ -566,7 +597,7 @@
                     (instr-dri-imm instr)
                     '())])))
 
-(define (decode/pb-b-op instr)
+(define (decode/pb-b-op instr i labels)
     (deconstruct-op (instr-op instr) pb-b-group-start
         [r/i pb-argument-types]
         [b-type pb-branches]
@@ -576,9 +607,13 @@
                     (vector-ref pb-branch-names b-type)
                     (instr-d-dest instr))]
             [(equal? r/i pb-immediate)
-                (format-instr/i
-                    (vector-ref pb-branch-names b-type)
-                    (instr-i-imm instr) 24 #t)])))
+                (let* ([target  (+ i (quotient (get-branch-target instr) 4))]
+                       [label (if (in-range target 0 (sub1 (vector-length labels)))
+                                (vector-ref labels target)
+                                "")])
+                    (format-instr/i
+                        (vector-ref pb-branch-names b-type)
+                        (instr-i-imm instr) label 24 #t))])))
 
 (define (decode/pb-b*-op instr)
     (deconstruct-op (instr-op instr) pb-b*-group-start
@@ -596,6 +631,9 @@
                     (instr-di-dest instr)
                     (instr-di-imm instr)
                     '())])))
+
+(define decode/pb-nop
+    "(nop)")
 
 (define (instr-op instr) (bitwise-and instr #xFF))
 
@@ -622,24 +660,6 @@
 
 (define (instr-i-imm instr) (arithmetic-shift instr -8))
 
-(define (decode-instruction/op-reg-imm/reg instr)
-    #f)
-
-(define (decode-instruction/op-reg-reg-imm/reg instr)
-    #f)
-
-(define (decode-instruction/op-reg-imm instr)
-    #f)
-
-(define (decode-instruction/op-imm instr)
-    #f)
-
-(define (decode-instruction instr shape)
-    (case shape
-        [(op-reg-imm/reg) (decode-instruction/op-reg-imm/reg instr)]
-        [(op-reg-reg-imm/reg) (decode-instruction/op-reg-reg-imm/reg instr)]
-        [(op-reg-imm) (decode-instruction/op-reg-imm instr)]
-        [(op-imm) (decode-instruction/op-imm instr)]))
 
 #|
 (define-pb-opcode
@@ -671,6 +691,40 @@
     [pb-fence pb-fences]
     [pb-chunk])|#
 
+
+(define (is-branch-imm? instr)
+    (if (in-range (instr-op instr) pb-b-group-start 
+            (+ pb-b-group-start 
+            (* (enum-field-count pb-branches) (enum-field-count pb-argument-types))))
+       (deconstruct-op (instr-op instr) pb-b-group-start
+            [r/i pb-argument-types]
+            [_ pb-branches]
+            (equal? r/i pb-immediate))
+        #f))
+
+(define (get-branch-target b-imm-instr)
+    (s-ext (instr-i-imm b-imm-instr) 24))
+
+(define (collect-jump-targets instrs)
+    (define branch-targets (make-vector (pb-count-instrs instrs) 0))
+    (let loop ([i 0]) 
+            (cond
+                [(equal? i (bytes-length instrs)) (void)]
+                [(<= (+ i pb-instruction-byte-size) (bytes-length instrs))
+                    (let* 
+                        ([instr-bytes (subbytes instrs i (+ i pb-instruction-byte-size))]
+                         [instr-idx (quotient i pb-instruction-byte-size)]
+                         [instr (bytes->instr instr-bytes 'little)])
+                            (when (is-branch-imm? instr)
+                                (let* ([offset (quotient (get-branch-target instr) pb-instruction-byte-size)]
+                                       [target (+ instr-idx offset)])
+                                    (when (in-range target 0 (vector-length branch-targets))
+                                        (begin
+                                            (vector-set! branch-targets target 1))))))
+                            (loop (+ i pb-instruction-byte-size))]
+                [else (error 'pb-disassemble "bad instruction format")]))
+    branch-targets)
+
 (define (pb-print-skeleton-instr instr)
 	(let ([instr (bytes->instr instr 'little)])
 		(format "(opcode: ~a ...)" (instr-op instr))))
@@ -699,10 +753,9 @@
         [(_ x a b)
             #'(and (<= a x) (<= x b))]))
 
-(define (disassemble instr-bytes)
+(define (disassemble instr-bytes instr-idx labels)
     (let ([instr (bytes->instr instr-bytes 'little)])
         (cond
-            [(> (instr-op instr) 255) ]
             [(in-range (instr-op instr) pb-mov-16-group-start (+ pb-mov-16-group-start (sub1 pb-mov-16-group-count)))
                 (decode/pb-mov16 instr)]
             [(in-range (instr-op instr) pb-mov-group-start (+ pb-mov-group-start (enum-field-count pb-mov-types)))
@@ -726,20 +779,27 @@
             [(in-range (instr-op instr) pb-st-group-start (+ pb-st-group-start (* (enum-field-count pb-sizes) (enum-field-count pb-argument-types))))
                 (decode/pb-st-op instr)]
             [(in-range (instr-op instr) pb-b-group-start (+ pb-b-group-start (* (enum-field-count pb-branches) (enum-field-count pb-argument-types))))
-                (decode/pb-b-op instr)]
+                (decode/pb-b-op instr instr-idx labels)]
             [(in-range (instr-op instr) pb-b*-group-start (+ pb-b*-group-start (enum-field-count pb-argument-types)))
                 (decode/pb-b*-op instr)]
+            [(equal? (instr-op instr) pb-nop) decode/pb-nop]
             [else (pb-print-skeleton-instr instr-bytes)])))
 
-(define (pb-skeleton-disassemble bs) 
+(define (disassemble-loop bs) 
+    (define targets (collect-jump-targets bs))
+    (define labels (make-labels targets))
 	(let loop ([i 0]) 
 		(cond
 			[(equal? i (bytes-length bs)) (void)]
 			[(<= (+ i pb-instruction-byte-size) (bytes-length bs))
                     (begin
+                        (define instr (subbytes bs i (+ i pb-instruction-byte-size)))
+                        (define instr-idx (quotient i pb-instruction-byte-size))
+                        (define label (vector-ref labels instr-idx))
                         (display 
-                            (format "~a: ~a" i (disassemble (subbytes bs i (+ i pb-instruction-byte-size)))))
-                        (display "\n")
+                            (format "~a:\t ~a\n" i (disassemble instr instr-idx labels)))
+                        (unless (equal? label "")
+                            (display (format "\t.~a:\n" label)))
                         (loop (+ i pb-instruction-byte-size)))]
 			[else (error 'pb-disassemble "bad instruction format")])))
 
@@ -748,10 +808,24 @@
 		(error 'pb-disassemble "bad instruction format"))
 	(quotient (bytes-length bs) pb-instruction-byte-size))
 
+(define (format-label lbl-n)
+    (format "l~a" lbl-n))
+
+(define (make-labels targets)
+    (define labels (make-vector (vector-length targets) ""))
+    (let loop ([i 0] [label-count 0])
+        (when (< i (vector-length targets))
+            (if (equal? (vector-ref targets i) 1)
+                (begin 
+                    (vector-set! labels i (format-label label-count))
+                    (loop (+ i 1) (+ label-count 1)))
+                (loop (+ i 1) label-count))))
+    labels)
+
 (define (pb-disassemble bs)
 	(unless (bytes? bs)
 		(error 'pb-disassemble "unexpected input type"))
 	(display (string-append
 		(format "byte-length: ~a\n" (bytes-length bs))
 		(format "number of instructions: ~a\n" (pb-count-instrs bs))))
-	(display (pb-skeleton-disassemble bs)))
+	(display (disassemble-loop bs)))
