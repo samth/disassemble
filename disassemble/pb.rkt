@@ -19,6 +19,13 @@
 ;;  |    op    |             immed                |
 ;;  -----------------------------------------------
 
+;; Helper Macro for defining a simple enumeration datatype
+;; Given a `enum-name` and field_1, ... field_n, defines the following:
+;; A struct,
+;;      (struct <enum-name>-struct [enum-fields])
+;;          where enum-fields is a list of symbols representing the fields
+;; An instance of the struct called <enum-name>
+;; A constant named each of field_1, ..., field_n for easy access to each of the enum fields
 (define-syntax (define/enum stx)
   (syntax-case stx ()
     [(_ name fields ...)
@@ -42,6 +49,8 @@
                            (define const-name #,i)
                            #,(loop (cdr fields*) (+ 1 i))))])))))]))
 
+;; Returns the field names for a corresponding enum by accessing the `enum-fields`
+;; of the corresponding instance
 (define-syntax (enum-fields stx)
   (syntax-case stx ()
     [(_ enum-name)
@@ -52,6 +61,22 @@
   (syntax-case stx ()
     [(_ enum-name)
         #`(length (enum-fields enum-name))]))
+
+;; PB instructions come in groups of different variants. For example, binops are defined as:
+;; [pb-bin-op pb-signals pb-binaries pb-argument-types] 
+;; where pb-signals is an enum representing each possible signal, pb-binaries is an enum representing each binop,
+;; and pb-argument-types represents immediate or register variants. Taking the product of these options
+;; yields the different binop variants. 
+
+;; On the disassembler end, we can use this macro, deconstruct-op, which is given an opcode and
+;; a list of known enum options that have been multiplied to form the opcode, and we can repeatedly
+;; take the modulus of the opcode and number of enum fields and "divide away" the number of enum fields
+;; in order to figure out exactly which variant an opcode corresponds to.
+
+;; In the binop example, there are two pb-signal variants: true and false. Thus, after subtracting 
+;; off a base value, to determine whether an opcode signals or not, we can simply take the opcode mod 2.
+;; Then, we can floor divide by 2 to collapse each signal variant to a single opcode, and we can continue this 
+;; mod/floor divide process for all the other listed enum variants to extract the other variant information.
 
 (define-syntax (deconstruct-op stx)
   (syntax-case stx ()
@@ -140,7 +165,7 @@
         "uint64"
         "single"
         "double"
-    ))
+))
 
 (define/enum pb-regs
     pb-reg-tc
@@ -197,7 +222,6 @@
     pb-lsr
     pb-asr
     pb-lslo)
-
 
   (define/enum pb-unaries
     pb-not
@@ -660,7 +684,6 @@
 
 (define (instr-i-imm instr) (arithmetic-shift instr -8))
 
-
 #|
 (define-pb-opcode
     [pb-nop]
@@ -691,7 +714,6 @@
     [pb-fence pb-fences]
     [pb-chunk])|#
 
-
 (define (is-branch-imm? instr)
     (if (in-range (instr-op instr) pb-b-group-start 
             (+ pb-b-group-start 
@@ -707,27 +729,28 @@
 
 (define (collect-jump-targets instrs)
     (define branch-targets (make-vector (pb-count-instrs instrs) 0))
-    (let loop ([i 0]) 
-            (cond
-                [(equal? i (bytes-length instrs)) (void)]
-                [(<= (+ i pb-instruction-byte-size) (bytes-length instrs))
-                    (let* 
-                        ([instr-bytes (subbytes instrs i (+ i pb-instruction-byte-size))]
-                         [instr-idx (quotient i pb-instruction-byte-size)]
-                         [instr (bytes->instr instr-bytes 'little)])
-                            (when (is-branch-imm? instr)
-                                (let* ([offset (quotient (get-branch-target instr) pb-instruction-byte-size)]
-                                       [target (+ instr-idx offset)])
-                                    (when (in-range target 0 (vector-length branch-targets))
-                                        (begin
-                                            (vector-set! branch-targets target 1))))))
-                            (loop (+ i pb-instruction-byte-size))]
-                [else (error 'pb-disassemble "bad instruction format")]))
+    (for-each-instr (instr-idx instr) (in-instr-bytes instrs 'little)
+        (when (is-branch-imm? instr)
+            (let* ([offset (quotient (get-branch-target instr) pb-instruction-byte-size)]
+                    [target (+ instr-idx offset)])
+                (when (in-range target 0 (vector-length branch-targets))
+                    (vector-set! branch-targets target 1)))))
     branch-targets)
 
-(define (pb-print-skeleton-instr instr)
-	(let ([instr (bytes->instr instr 'little)])
-		(format "(opcode: ~a ...)" (instr-op instr))))
+(define-syntax (for-each-instr stx)
+  (syntax-case stx (in-instr-bytes)
+    [(_ (idx instr) (in-instr-bytes bs endian) body ...)
+       #'(let loop ([i 0]) 
+         (cond
+           [(equal? i (bytes-length bs)) (void)]
+           [(<= (+ i pb-instruction-byte-size) (bytes-length bs))
+            (begin
+              (define instr-bytes (subbytes bs i (+ i pb-instruction-byte-size)))
+              (define instr (bytes->instr instr-bytes endian))
+              (define idx (quotient i pb-instruction-byte-size))
+              body ...
+              (loop (+ i pb-instruction-byte-size)))]))]
+         [else (error 'pb-disassemble "bad instruction format")]))
 
 (define (bytes->instr-little-endian instr-bytes)
 	(bitwise-ior 
@@ -753,8 +776,11 @@
         [(_ x a b)
             #'(and (<= a x) (<= x b))]))
 
-(define (disassemble instr-bytes instr-idx labels)
-    (let ([instr (bytes->instr instr-bytes 'little)])
+(define (pb-print-skeleton-instr instr)
+		(format "(opcode: ~a ...)" (instr-op instr)))
+
+; TODO: Clean up range checking logic here?
+(define (disassemble instr instr-idx labels)
         (cond
             [(in-range (instr-op instr) pb-mov-16-group-start (+ pb-mov-16-group-start (sub1 pb-mov-16-group-count)))
                 (decode/pb-mov16 instr)]
@@ -783,25 +809,19 @@
             [(in-range (instr-op instr) pb-b*-group-start (+ pb-b*-group-start (enum-field-count pb-argument-types)))
                 (decode/pb-b*-op instr)]
             [(equal? (instr-op instr) pb-nop) decode/pb-nop]
-            [else (pb-print-skeleton-instr instr-bytes)])))
+            [else (pb-print-skeleton-instr instr)]))
 
 (define (disassemble-loop bs) 
     (define targets (collect-jump-targets bs))
     (define labels (make-labels targets))
-	(let loop ([i 0]) 
-		(cond
-			[(equal? i (bytes-length bs)) (void)]
-			[(<= (+ i pb-instruction-byte-size) (bytes-length bs))
-                    (begin
-                        (define instr (subbytes bs i (+ i pb-instruction-byte-size)))
-                        (define instr-idx (quotient i pb-instruction-byte-size))
-                        (define label (vector-ref labels instr-idx))
-                        (display 
-                            (format "~a:\t ~a\n" i (disassemble instr instr-idx labels)))
-                        (unless (equal? label "")
-                            (display (format "\t.~a:\n" label)))
-                        (loop (+ i pb-instruction-byte-size)))]
-			[else (error 'pb-disassemble "bad instruction format")])))
+    (for-each-instr (instr-idx instr) (in-instr-bytes bs 'little)
+        (begin
+            (define label (vector-ref labels instr-idx))
+            (display 
+                (format "~a:\t ~a\n" (* pb-instruction-byte-size instr-idx) 
+                                     (disassemble instr instr-idx labels)))
+            (unless (equal? label "")
+                (display (format "\t.~a:\n" label))))))
 
 (define (pb-count-instrs bs)
 	(unless (equal? (remainder (bytes-length bs) pb-instruction-byte-size) 0)
