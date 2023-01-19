@@ -12,3 +12,4 @@
 		(* n (fact (- n 1)))))
 
 (decompile fact)
+;(decompile iter)

@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require racket/match ffi/unsafe racket/lazy-require
+(require racket/match racket/list ffi/unsafe racket/lazy-require
          version/utils racket/format
          (only-in machine-code/disassembler get-disassembler)
          (prefix-in fc: "fcdisasm.rkt")
@@ -187,13 +187,28 @@
                                     [(regexp-match? #rx#"aarch64" sp) 'aarch64]
                                     [else sp]))])
                  (system-type 'target-machine)))
-  (case arch
-    [(i386) 'x86-32]
-    [(x86_64) 'x86-64]
-    [(aarch64) 'arm-a64]
-	[(tpb64l) 'tpb64l]
-	[(pb64l) 'pb64l] ; add additional pb variants here...
+  (cond
+    [(equal? arch 'i386) 'x86-32]
+    [(equal? arch 'x86_64) 'x86-64]
+    [(equal? arch 'aarch64) 'arm-a64]
+    [(pb-arch? (symbol->string arch)) arch]
     [else (error 'disassemble "unsupported architecture: ~s" arch)]))
+
+(define (pb-arch? arch)
+    (regexp-match? #rx#"^(t?)pb((?>32|64)?)(l?)$" arch))
+
+(define (get-pb-config pb-arch)
+    (let ([parts (regexp-match #rx#"^(t?)pb((?>32|64)?)(l?)$" pb-arch)])
+    (if parts
+        (let
+            ([t (second parts)]
+             [bits (third parts)]
+             [l (fourth parts)])
+            (pb-config
+                (if (equal? bits #"32") '32 '64)
+                (if (equal? l #"l") 'little 'big)
+                (not (equal? t #""))))
+        #f)))
 
 ;; #f for arch is "auto-detect"
 (define (disassemble f #:program [prog #f] #:arch [arch #f])
@@ -217,19 +232,22 @@
     (case prog
       [(nasm) (display (nasm-disassemble bs))]
       [else
-	  	(case arch
-			[(tpb64l) (void (pb-disassemble bs))]
-			[else
+        (let loop ([relocations relocations])
+                                    (if (null? relocations)
+                                        '()
+                                        (let ([p (car relocations)])
+                                        (mcons (mcons (cdr p) (car p))
+                                                (loop (cdr relocations))))))
+        (print (format "relocations are: ~a\n" relocations))
+        (cond
+            [(pb-arch? (symbol->string arch))
+                (pb-disassemble bs (get-pb-config (symbol->string arch)) relocations)]
+            [else
 				(fc:disassemble (open-input-bytes bs)
 								(get-disassembler arch)
 								color #f 0 '()
 								;; Convert relocations to mutable-pair associations:
-								(let loop ([relocations relocations])
-									(if (null? relocations)
-										'()
-										(let ([p (car relocations)])
-										(mcons (mcons (cdr p) (car p))
-												(loop (cdr relocations))))))
+								
 								;; recognize instruction-pointer register:
 								(case arch
 									[(x86-32) (lambda (x) (eq? x 'eip))]

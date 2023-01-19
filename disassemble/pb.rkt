@@ -1,7 +1,7 @@
 #lang racket
 
 (require (for-syntax racket/syntax))
-(provide pb-disassemble)
+(provide pb-disassemble pb-config)
 
 (define pb-instruction-byte-size 4)
 
@@ -19,7 +19,7 @@
 ;;  |    op    |             immed                |
 ;;  -----------------------------------------------
 
-;; Helper Macro for defining a simple enumeration datatype
+;; Helper Macro for defining a simple enumeration datatype.
 ;; Given a `enum-name` and field_1, ... field_n, defines the following:
 ;; A struct,
 ;;      (struct <enum-name>-struct [enum-fields])
@@ -68,13 +68,13 @@
 ;; and pb-argument-types represents immediate or register variants. Taking the product of these options
 ;; yields the different binop variants. 
 
-;; On the disassembler end, we can use this macro, deconstruct-op, which is given an opcode and
+;; On the disassembler end, we can use the following macro, deconstruct-op, which is given an opcode and
 ;; a list of known enum options that have been multiplied to form the opcode, and we can repeatedly
 ;; take the modulus of the opcode and number of enum fields and "divide away" the number of enum fields
 ;; in order to figure out exactly which variant an opcode corresponds to.
 
 ;; In the binop example, there are two pb-signal variants: true and false. Thus, after subtracting 
-;; off a base value, to determine whether an opcode signals or not, we can simply take the opcode mod 2.
+;; off a base value, to determine whether an opcode signals or not we can simply take the opcode mod 2.
 ;; Then, we can floor divide by 2 to collapse each signal variant to a single opcode, and we can continue this 
 ;; mod/floor divide process for all the other listed enum variants to extract the other variant information.
 
@@ -108,6 +108,9 @@
 (define pb-b-group-start 204)
 (define pb-b*-group-start 210)
 (define pb-nop 0)
+(define pb-literal 1)
+(define pb-return 213)
+(define pb-adr 215)
 
 (define/enum pb-argument-types
     pb-register
@@ -629,7 +632,7 @@
             [(equal? r/i pb-register)
                 (format-instr/d
                     (vector-ref pb-branch-names b-type)
-                    (instr-d-dest instr))]
+                    (instr-dr-reg instr))]
             [(equal? r/i pb-immediate)
                 (let* ([target  (+ i (quotient (get-branch-target instr) 4))]
                        [label (if (in-range target 0 (sub1 (vector-length labels)))
@@ -656,8 +659,27 @@
                     (instr-di-imm instr)
                     '())])))
 
+(define (decode/pb-adr-op instr)
+    (format-instr/di
+        "adr"
+        (instr-adr-dest instr)
+        ; immediate for pb-adr is an instruction-level offset
+        (* (instr-adr-imm instr) pb-instruction-byte-size)
+        '()))
+
 (define decode/pb-nop
     "(nop)")
+
+(define (decode/pb-literal-op instr num-words)
+    (format-instr/d
+        "literal"
+        (instr-di-dest instr)))
+
+(define (decode/pb-return-op instr)
+    "(return)")
+
+; (define (decode/pb-call-op instr)
+;     "(call)")
 
 (define (instr-op instr) (bitwise-and instr #xFF))
 
@@ -683,6 +705,7 @@
 (define (instr-dri-imm instr) (arithmetic-shift instr -16))
 
 (define (instr-i-imm instr) (arithmetic-shift instr -8))
+
 
 #|
 (define-pb-opcode
@@ -748,8 +771,10 @@
               (define instr-bytes (subbytes bs i (+ i pb-instruction-byte-size)))
               (define instr (bytes->instr instr-bytes endian))
               (define idx (quotient i pb-instruction-byte-size))
+              (define inc (if (equal? (instr-op instr) pb-literal) 3 1))
+              
               body ...
-              (loop (+ i pb-instruction-byte-size)))]))]
+              (loop (+ i (* inc pb-instruction-byte-size))))]))]
          [else (error 'pb-disassemble "bad instruction format")]))
 
 (define (bytes->instr-little-endian instr-bytes)
@@ -779,8 +804,14 @@
 (define (pb-print-skeleton-instr instr)
 		(format "(opcode: ~a ...)" (instr-op instr)))
 
+(define (literal-word-size sz)
+    (cond
+        [(equal? sz '32) 2]
+        [(equal? sz '64) 3]
+        [else (error 'pb-dissassemble "invalid word size ~a" sz)]))
+
 ; TODO: Clean up range checking logic here?
-(define (disassemble instr instr-idx labels)
+(define (disassemble instr instr-idx labels config)
         (cond
             [(in-range (instr-op instr) pb-mov-16-group-start (+ pb-mov-16-group-start (sub1 pb-mov-16-group-count)))
                 (decode/pb-mov16 instr)]
@@ -809,20 +840,46 @@
             [(in-range (instr-op instr) pb-b*-group-start (+ pb-b*-group-start (enum-field-count pb-argument-types)))
                 (decode/pb-b*-op instr)]
             [(equal? (instr-op instr) pb-nop) decode/pb-nop]
+            [(equal? (instr-op instr) pb-literal) (decode/pb-literal-op instr 
+                                                        (literal-word-size (pb-config-bits config)))]
+            [(equal? (instr-op instr) pb-return) (decode/pb-return-op instr)]
+            [(equal? (instr-op instr) pb-adr) (decode/pb-adr-op instr)]
             [else (pb-print-skeleton-instr instr)]))
 
-(define (disassemble-loop bs) 
+; (define (make-relocations bs relocs)
+;     (for-each-instr (instr-idx instr) (in-instr-bytes instrs 'little)
+;         ()
+;     )
+
+
+(struct pb-config ([bits] [endian] [threaded?]) #:transparent)
+
+(define (format-relocation name)
+    (format "(relocation ~a)" name))
+
+(define (disassemble-loop bs config relocs) 
     (define targets (collect-jump-targets bs))
     (define labels (make-labels targets))
+    (define rs (reverse relocs))
+    (define instr-length (pb-count-instrs bs))
     (for-each-instr (instr-idx instr) (in-instr-bytes bs 'little)
         (begin
             (define label (vector-ref labels instr-idx))
+            (define instr-addr (* instr-idx pb-instruction-byte-size))
             (display 
-                (format "~a:\t ~a\n" (* pb-instruction-byte-size instr-idx) 
-                                     (disassemble instr instr-idx labels)))
+                (format "~a:\t ~a\n" instr-addr 
+                                    (disassemble instr instr-idx labels config)))
             (unless (equal? label "")
-                (display (format "\t.~a:\n" label))))))
-
+                (display (format "\n\t.~a:\n" label)))
+            
+            (when (equal? instr-addr (+ (cdr (first rs)) 12))
+                (display (format "~a:\t ~a\n" instr-addr (format-relocation (car (first rs)))))
+                (set! rs (rest rs)))))
+        ; handle the case where a relocation point is at the address after the final instruction 
+        (unless (null? rs)
+            (display (format "~a:\t ~a\n" (* instr-length pb-instruction-byte-size) 
+                                                        (format-relocation (car (first rs)))))))
+                
 (define (pb-count-instrs bs)
 	(unless (equal? (remainder (bytes-length bs) pb-instruction-byte-size) 0)
 		(error 'pb-disassemble "bad instruction format"))
@@ -842,10 +899,13 @@
                 (loop (+ i 1) label-count))))
     labels)
 
-(define (pb-disassemble bs)
+(define (pb-disassemble bs config relocations)
+    (display (format "pb config: ~a" config))
 	(unless (bytes? bs)
 		(error 'pb-disassemble "unexpected input type"))
 	(display (string-append
 		(format "byte-length: ~a\n" (bytes-length bs))
 		(format "number of instructions: ~a\n" (pb-count-instrs bs))))
-	(display (disassemble-loop bs)))
+	(display (disassemble-loop bs config relocations)))
+
+; TODO: Fill in other instruction variants
