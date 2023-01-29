@@ -5,6 +5,25 @@
 
 (define pb-instruction-byte-size 4)
 
+(define pb-binop-group-start 22)
+(define pb-mov-16-group-start 2)
+(define pb-mov-16-group-count 8)
+(define pb-mov-group-start 10)
+(define pb-cmp-group-start 74)
+(define pb-fp-binop-group-start 92)
+(define pb-unop-group-start 118)
+(define pb-fp-unop-group-start 122)
+(define pb-fp-cmp-op-group-start 126)
+(define pb-rev-op-group-start 144)
+(define pb-ld-group-start 164)
+(define pb-st-group-start 184)
+(define pb-b-group-start 204)
+(define pb-b*-group-start 210)
+(define pb-nop 0)
+(define pb-literal 1)
+(define pb-return 213)
+(define pb-adr 215)
+
 ;; PB instruction shapes. All instructions are 4 bytes in length
 ;;  -----------------------------------------------
 ;;  |    op    |    reg    |     immed/reg        |
@@ -92,25 +111,6 @@
                                     [enum-count (format-id stx "~a-count" (car enums))])
                         #`(let ([name (remainder (quotient rel #,div) #,(syntax-local-value #'enum-count))])
                             #,(loop (cdr names) (cdr enums) (* div (syntax-local-value #'enum-count)))))])))]))
-
-(define pb-binop-group-start 22)
-(define pb-mov-16-group-start 2)
-(define pb-mov-16-group-count 8)
-(define pb-mov-group-start 10)
-(define pb-cmp-group-start 74)
-(define pb-fp-binop-group-start 92)
-(define pb-unop-group-start 118)
-(define pb-fp-unop-group-start 122)
-(define pb-fp-cmp-op-group-start 126)
-(define pb-rev-op-group-start 144)
-(define pb-ld-group-start 164)
-(define pb-st-group-start 184)
-(define pb-b-group-start 204)
-(define pb-b*-group-start 210)
-(define pb-nop 0)
-(define pb-literal 1)
-(define pb-return 213)
-(define pb-adr 215)
 
 (define/enum pb-argument-types
     pb-register
@@ -310,21 +310,23 @@
                 "r12"
                 "r13"
                 "r14"
-                "r15"
-                "fp1"
-                "fp2"
-                "fp3"
-                "fp4"
-                "fp5"
-                "fp6"
-                "fp7"
-                "fp8"))
+                "r15"))
+
+(define fp-reg-names (vector
+    "fp1"
+    "fp2"
+    "fp3"
+    "fp4"
+    "fp5"
+    "fp6"
+    "fp7"
+    "fp8"))
 
 (define (format-instr-parts op-name properties)
     (format "(~s ~s)" op-name (string-join properties " ")))
 
-(define (format-reg r)
-    (let ([reg-name (vector-ref reg-names r)])
+(define (format-reg r [fp #f])
+    (let ([reg-name (if fp (vector-ref fp-reg-names r) (vector-ref reg-names r))])
                 (format "%~a" reg-name)))
 
 (define (s-ext imm imm-sz)
@@ -342,15 +344,15 @@
 (define (format-props props)
     (string-join (map format-prop props)))
 
-(define (format-instr/dri op-name dest reg imm props)
+(define (format-instr/dri op-name dest reg imm props [is-fp? '(#f #f #f)])
     (if (null? props)
-        (format "(~a ~a ~a ~a)" op-name (format-reg dest) (format-reg reg) (format-imm imm 0 #f))
-        (format "(~a ~a ~a ~a ~a)" op-name (format-reg dest) (format-reg reg) (format-imm imm 0 #f) (format-props props))))
+        (format "(~a ~a ~a ~a)" op-name (format-reg dest (first is-fp?)) (format-reg reg (second is-fp?)) (format-imm imm 0 #f))
+        (format "(~a ~a ~a ~a ~a)" op-name (format-reg dest (first is-fp?)) (format-reg reg (second is-fp?)) (format-imm imm 0 #f) (format-props props))))
 
-(define (format-instr/dir op-name dest reg imm props)
+(define (format-instr/dir op-name dest reg imm props [is-fp? '(#f #f #f)])
     (if (null? props)
-        (format "(~a ~a ~a ~a)" op-name (format-reg dest) (format-imm imm 0 #f) (format-reg reg))
-        (format "(~a ~a ~a ~a ~a)" op-name (format-reg dest) (format-imm imm 0 #f) (format-reg reg) (format-props props))))
+        (format "(~a ~a ~a ~a)" op-name (format-reg dest (first is-fp?)) (format-imm imm 0 #f) (format-reg reg (second is-fp?)))
+        (format "(~a ~a ~a ~a ~a)" op-name (format-reg dest (first is-fp?)) (format-imm imm 0 #f) (format-reg reg (second is-fp?)) (format-props props))))
 
 (define (format-instr/di op dst imm props)
     (if (null? props)
@@ -364,30 +366,30 @@
             (format-imm imm 0 #f)
             (format-props props))))
 
-(define (format-instr/dr op dst reg props)
+(define (format-instr/dr op dst reg props [is-fp? '(#f #f)])
     (if (null? props)
         (format "(~a ~a ~a)"
             op
-            (format-reg dst)
-            (format-reg reg))
+            (format-reg dst (first is-fp?))
+            (format-reg reg (second is-fp?)))
         (format "(~a ~a ~a ~a)"
             op
-            (format-reg dst)
-            (format-reg reg)
+            (format-reg dst (first is-fp?))
+            (format-reg reg (second is-fp?))
             (format-props props))))
 
-(define (format-instr/drr op dst r1 r2 props)
+(define (format-instr/drr op dst r1 r2 props [is-fp? '(#f #f #f)])
     (if (null? props)
         (format "(~a ~a ~a ~a)"
             op
-            (format-reg dst)
-            (format-reg r1)
-            (format-reg r2))
+            (format-reg dst (first is-fp?))
+            (format-reg r1 (second is-fp?))
+            (format-reg r2 (third is-fp?)))
         (format "(~a ~a ~a ~a ~a)"
             op
-            (format-reg dst)
-            (format-reg r1)
-            (format-reg r2)
+            (format-reg dst (first is-fp?))
+            (format-reg r1 (second is-fp?))
+            (format-reg r2 (third is-fp?))
             (format-props props))))
 
 (define (format-instr/d op dest)
@@ -435,7 +437,7 @@
 
 (define (format/pb-mov16 s zk reg imm)
     (format-instr/di
-        "pb-mov-16"
+        "mov-16"
         reg
         imm
         (list (zero/keep zk)
@@ -460,7 +462,7 @@
          (cond 
             [(equal? mov-type pb-i-i-bits->d-bits)
                 "(unsupported)"]
-            [else (format-instr/dr "pb-mov" dst reg (list (mov-type movt)))])))
+            [else (format-instr/dr "mov" dst reg (list (mov-type movt)))])))
 
 (define (decode/pb-binop instr)
     (let*
@@ -524,18 +526,20 @@
                     '())])))
 
 (define (decode/pb-fp-binop instr)
-    (deconstruct-op (instr-op instr) pb-binop-group-start
+    (deconstruct-op (instr-op instr) pb-fp-binop-group-start
         [drr/dri pb-argument-types]
         [op-kind pb-binaries]
-        (cond 
-            [(equal? drr/dri 0)
-                (format-instr/drr
-                    (vector-ref pb-fp-binop-names op-kind)
-                    (instr-drr-dest instr)
-                    (instr-drr-reg1 instr)
-                    (instr-drr-reg2 instr)
-                    '())]
-            [else (error 'pb-disassemble "floating-point instruction cannot have dri variant")])))
+        (begin
+            (cond 
+                [(equal? drr/dri pb-register)
+                    (format-instr/drr
+                        (vector-ref pb-fp-binop-names op-kind)
+                        (instr-drr-dest instr)
+                        (instr-drr-reg1 instr)
+                        (instr-drr-reg2 instr)
+                        '() 
+                        '(#t #t #t))]
+                [else (error 'pb-disassemble "floating-point instruction cannot have dri variant")]))))
 
 (define (decode/pb-unop instr) 
     (deconstruct-op (instr-op instr) pb-unop-group-start
@@ -555,20 +559,20 @@
                     (instr-dr-reg instr)
                     '())])))
 
-(define (decode/pb-fp-cmp instr)
+(define (decode/pb-fp-cmp-op instr)
     (deconstruct-op (instr-op instr) pb-fp-cmp-op-group-start 
         [drr/dri pb-argument-types]
         [op-kind pb-cmp-ops]
         (cond
             [(equal? drr/dri pb-register)
-                (format-instr/drr
+                (format-instr/dr
                     (vector-ref 
                         pb-fp-cmp-op-names
                         op-kind)
-                    (instr-drr-dest instr)
-                    (instr-drr-reg1 instr)
-                    (instr-drr-reg2 instr)
-                    '())]
+                    (instr-dr-dest instr)
+                    (instr-dr-reg instr)
+                    '()
+                    '(#t #t))]
             [else (error 'pb-disassemble "floating point instruction canot have dri variant")])))
 
 (define (decode/pb-rev-op instr)
@@ -588,41 +592,48 @@
     (deconstruct-op (instr-op instr) pb-ld-group-start
         [drr/dri pb-argument-types]
         [sz pb-sizes]
-        (cond
-            [(equal? drr/dri pb-register)
-                (format-instr/drr
-                    (format "ld-~a" (vector-ref pb-size-names sz))
-                    (instr-drr-dest instr)
-                    (instr-drr-reg1 instr)
-                    (instr-drr-reg2 instr)
-                    '())]
-            [(equal? drr/dri pb-immediate)
-                (format-instr/dri
-                    (format "ld-~a" (vector-ref pb-size-names sz))
-                    (instr-dri-dest instr)
-                    (instr-dri-reg instr)
-                    (instr-dri-imm instr)
-                    '())])))
+        (let ([fp (or (equal? sz pb-single) (equal? sz pb-double))])
+            (cond
+                [(equal? drr/dri pb-register)
+                    (format-instr/drr
+                        (format "ld-~a" (vector-ref pb-size-names sz))
+                        (instr-drr-dest instr)
+                        (instr-drr-reg1 instr)
+                        (instr-drr-reg2 instr)
+                        '()
+                        (list #f #f))]
+                [(equal? drr/dri pb-immediate)
+                    (format-instr/dri
+                        (format "ld-~a" (vector-ref pb-size-names sz))
+                        (instr-dri-dest instr)
+                        (instr-dri-reg instr)
+                        (instr-dri-imm instr)
+                        '()
+                        (list fp #f #f))]))))
 
 (define (decode/pb-st-op instr)
     (deconstruct-op (instr-op instr) pb-st-group-start
         [drr/dri pb-argument-types]
         [sz pb-sizes]
-        (cond
-            [(equal? drr/dri pb-register)
-                (format-instr/drr
-                    (format "st-~a" (vector-ref pb-size-names sz))
-                    (instr-drr-dest instr)
-                    (instr-drr-reg1 instr)
-                    (instr-drr-reg2 instr)
-                    '())]
-            [(equal? drr/dri pb-immediate)
-                (format-instr/dir
-                    (format "st-~a" (vector-ref pb-size-names sz))
-                    (instr-dri-dest instr)
-                    (instr-dri-reg instr)
-                    (instr-dri-imm instr)
-                    '())])))
+        (let 
+            ([fp (or (equal? sz pb-double) (equal? sz pb-single))])
+            (cond
+                [(equal? drr/dri pb-register)
+                    (format-instr/drr
+                        (format "st-~a" (vector-ref pb-size-names sz))
+                        (instr-drr-dest instr)
+                        (instr-drr-reg1 instr)
+                        (instr-drr-reg2 instr)
+                        '()
+                        (list fp #f #f))]
+                [(equal? drr/dri pb-immediate)
+                    (format-instr/dir
+                        (format "st-~a" (vector-ref pb-size-names sz))
+                        (instr-dri-dest instr)
+                        (instr-dri-reg instr)
+                        (instr-dri-imm instr)
+                        '()
+                        (list fp #f #f))]))))
 
 (define (decode/pb-b-op instr i labels)
     (deconstruct-op (instr-op instr) pb-b-group-start
@@ -799,7 +810,7 @@
 (define-syntax (in-range stx)
     (syntax-case stx ()
         [(_ x a b)
-            #'(and (<= a x) (<= x b))]))
+            #'(and (<= a x) (< x b))]))
 
 (define (pb-print-skeleton-instr instr)
 		(format "(opcode: ~a ...)" (instr-op instr)))
@@ -826,6 +837,8 @@
             [(in-range (instr-op instr) pb-fp-binop-group-start (+ pb-fp-binop-group-start 
                 (* (enum-field-count pb-argument-types) (enum-field-count pb-binaries))))
                 (decode/pb-fp-binop instr)]
+            [(in-range (instr-op instr) pb-fp-cmp-op-group-start (+ pb-fp-cmp-op-group-start (* (enum-field-count pb-cmp-ops) (enum-field-count pb-argument-types))))
+                (decode/pb-fp-cmp-op instr)]
             [(in-range (instr-op instr) pb-unop-group-start (+ pb-unop-group-start 
                                                                 (* (enum-field-count pb-argument-types) (enum-field-count pb-unaries))))
                 (decode/pb-unop instr)]
@@ -850,7 +863,6 @@
 ;     (for-each-instr (instr-idx instr) (in-instr-bytes instrs 'little)
 ;         ()
 ;     )
-
 
 (struct pb-config ([bits] [endian] [threaded?]) #:transparent)
 
