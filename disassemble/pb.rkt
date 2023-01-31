@@ -1,6 +1,8 @@
 #lang racket
 
 (require (for-syntax racket/syntax))
+(require racket/fixnum)
+
 (provide pb-disassemble pb-config)
 
 (define pb-instruction-byte-size 4)
@@ -410,14 +412,6 @@
                     (format-imm imm im-sz sgn?)
                     (format-label-imm label imm im-sz sgn?))))
 
-; (define (format-instr/adr-dest op addr dst r1 imm)
-;     (format "(~a ~a ~a ~a ~a)"
-;         op
-;         (format-offset addr)
-;         (format-reg dst)
-;         (format-reg reg)
-;         (format-imm imm)))
-
 (struct zero/keep [zk])
 (struct shift [s])
 (struct mov-type [mt])
@@ -573,7 +567,7 @@
                     (instr-dr-reg instr)
                     '()
                     '(#t #t))]
-            [else (error 'pb-disassemble "floating point instruction canot have dri variant")])))
+            [else (error 'pb-disassemble "floating point instruction cannot have dri variant")])))
 
 (define (decode/pb-rev-op instr)
     (deconstruct-op (instr-op instr) pb-rev-op-group-start
@@ -635,6 +629,24 @@
                         '()
                         (list fp #f #f))]))))
 
+(define (bsearch cmp vec e start end)
+  (if (< start end)
+      (let*
+          ([mid (quotient (+ end start) 2)]
+           [cur (vector-ref vec mid)]
+           [c (cmp e cur)])
+        (cond
+          [(equal? c 0) cur]
+          [(equal? c -1) (bsearch cmp vec e start mid)]
+          [(equal? c 1) (bsearch cmp vec e (+ 1 mid) end)]))
+      #f))
+
+(define (cmp-label-offset offset lbl)
+    (cond
+        [(equal? offset (label-offset lbl)) 0]
+        [(< offset (label-offset lbl)) -1]
+        [else 1]))
+
 (define (decode/pb-b-op instr i labels)
     (deconstruct-op (instr-op instr) pb-b-group-start
         [r/i pb-argument-types]
@@ -645,13 +657,11 @@
                     (vector-ref pb-branch-names b-type)
                     (instr-dr-reg instr))]
             [(equal? r/i pb-immediate)
-                (let* ([target  (+ i (quotient (get-branch-target instr) 4))]
-                       [label (if (in-range target 0 (sub1 (vector-length labels)))
-                                (vector-ref labels target)
-                                "")])
-                    (format-instr/i
-                        (vector-ref pb-branch-names b-type)
-                        (instr-i-imm instr) label 24 #t))])))
+                (let* ([target (+ (* pb-instruction-byte-size (+ 1 i)) (get-branch-target instr))]
+                       [label (bsearch cmp-label-offset labels target 0 (vector-length labels))])
+                       (format-instr/i
+                            (vector-ref pb-branch-names b-type)
+                            (instr-i-imm instr) (if label (label-name label) "") 24 #t))])))
 
 (define (decode/pb-b*-op instr)
     (deconstruct-op (instr-op instr) pb-b*-group-start
@@ -748,6 +758,104 @@
     [pb-fence pb-fences]
     [pb-chunk])|#
 
+
+#|
+In Chez Scheme, the rp-header and rp-compact-header structures are defined as follows:
+
+(define-primitive-structure-disps rp-header type-untyped
+  ([uptr toplink]
+   [uptr mv-return-address]
+   [ptr livemask]
+   [iptr frame-size]))
+
+(define-primitive-structure-disps rp-compact-header type-untyped
+  ([uptr toplink]
+   [iptr mask+size+mode]))
+
+Assuming that sizeof(uptr) = sizeof(ptr) = sizeof(iptr) = machine word size,
+We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header) = 2*(word size)
+|#
+
+
+(define size-rp-compact-header 2)
+(define size-rp-header 4)
+
+(define (format-label lbl-n)
+    (format "l~a" lbl-n))
+
+(struct label ([offset] [name]) #:transparent)
+(define (new-label offset n)
+    (label offset (format-label n)))
+
+(define (read-instr bs i endian)
+    (let ([instr-bytes (subbytes bs i (+ i pb-instruction-byte-size))])
+        (bytes->instr instr-bytes endian)))
+
+(define (sort-dedup-labels labels)
+    (let* ([sorted (sort labels (lambda (a b) (< a b)))]
+           [deduped (remove-duplicates sorted)])
+           (reverse (foldl (lambda (offset lst) (cons (new-label offset (length lst)) lst))  '() deduped))))
+
+; note: adapted from chez scheme pbchunk.ss
+(define (collect-headers-labels bs config len)
+  (define word-size (native-word-size (pb-config-bits config)))
+  (let loop ([i 0] [headers '()] [labels '()])
+    (cond
+      [(fx= i len) (values '() (sort-dedup-labels labels))]
+
+      [(and (pair? headers)
+            ; if we hit the index of an rp header, skip over it
+            (fx= i (caar headers)))
+       (let ([size (cdar headers)])
+         (let ([i (+ i size)])
+           (let-values ([(rest-headers labels) (loop i (cdr headers) labels)])
+             (values (cons (car headers) rest-headers)
+                     labels))))]
+      [else
+       (let ([instr (read-instr bs i (pb-config-endian config))])
+         (define (next)
+           (loop (fx+ i pb-instruction-byte-size) headers labels))
+
+         (define (next/add-label new-label)
+           (loop (fx+ i pb-instruction-byte-size) headers (cons new-label labels)))
+
+         (define (next/adr)
+           (let ([delta (fx* pb-instruction-byte-size (instr-adr-imm instr))])
+             (cond
+               [(> delta 0)
+                (let* ([after (fx+ i pb-instruction-byte-size delta)]
+                       [size (if (fx= 1 (fxand 1 (bytes-ref bs (fx- after
+                                                                            (if (eq? (pb-config-endian config) 'little)
+                                                                                word-size
+                                                                                1)))))
+                                 (* size-rp-compact-header word-size)
+                                 (* size-rp-header word-size))]
+                       [start (fx- after size)]
+                       [header (cons start size)])
+                  (loop (fx+ i pb-instruction-byte-size)
+                        ;; (mflatt) insert keeping headers sorted
+                        (let sort-loop ([headers headers])
+                          (cond
+                            [(null? headers) (list header)]
+                            [(fx<= start (caar headers)) (cons header headers)]
+                            [else (cons (car headers) (sort-loop (cdr headers)))]))
+                        labels))]
+               [else (next)])))
+
+         (define (next-branch)
+           (let* ([delta (get-branch-target instr)]
+                  [target-label (fx+ i pb-instruction-byte-size delta)])
+             (next/add-label target-label)))
+
+         (define (next/literal)
+           (loop (fx+ i pb-instruction-byte-size word-size) headers labels))
+
+         (cond
+            [(is-branch-imm? instr) (next-branch)]
+            [(equal? (instr-op instr) pb-adr) (next/adr)]
+            [(equal? (instr-op instr) pb-literal) (next/literal)]
+            [else (next)]))])))
+
 (define (is-branch-imm? instr)
     (if (in-range (instr-op instr) pb-b-group-start 
             (+ pb-b-group-start 
@@ -821,6 +929,12 @@
         [(equal? sz '64) 3]
         [else (error 'pb-dissassemble "invalid word size ~a" sz)]))
 
+(define (native-word-size sz)
+    (cond
+        [(equal? sz '32) 4]
+        [(equal? sz '64) 8]
+        [else (error 'pb-dissassemble "invalid word size ~a" sz)]))
+
 ; TODO: Clean up range checking logic here?
 (define (disassemble instr instr-idx labels config)
         (cond
@@ -859,46 +973,61 @@
             [(equal? (instr-op instr) pb-adr) (decode/pb-adr-op instr)]
             [else (pb-print-skeleton-instr instr)]))
 
-; (define (make-relocations bs relocs)
-;     (for-each-instr (instr-idx instr) (in-instr-bytes instrs 'little)
-;         ()
-;     )
-
 (struct pb-config ([bits] [endian] [threaded?]) #:transparent)
 
 (define (format-relocation name)
     (format "(relocation ~a)" name))
 
 (define (disassemble-loop bs config relocs) 
-    (define targets (collect-jump-targets bs))
-    (define labels (make-labels targets))
-    (define rs (reverse relocs))
-    (define instr-length (pb-count-instrs bs))
-    (for-each-instr (instr-idx instr) (in-instr-bytes bs 'little)
-        (begin
-            (define label (vector-ref labels instr-idx))
-            (define instr-addr (* instr-idx pb-instruction-byte-size))
-            (display 
-                (format "~a:\t ~a\n" instr-addr 
-                                    (disassemble instr instr-idx labels config)))
-            (unless (equal? label "")
-                (display (format "\n\t.~a:\n" label)))
-            
-            (when (equal? instr-addr (+ (cdr (first rs)) 12))
-                (display (format "~a:\t ~a\n" instr-addr (format-relocation (car (first rs)))))
-                (set! rs (rest rs)))))
-        ; handle the case where a relocation point is at the address after the final instruction 
-        (unless (null? rs)
-            (display (format "~a:\t ~a\n" (* instr-length pb-instruction-byte-size) 
-                                                        (format-relocation (car (first rs)))))))
+    (define word-size (native-word-size (pb-config-bits config)))
+    (let-values ([(rp-headers labels) (collect-headers-labels bs config (bytes-length bs))])
+        (let*
+              ([labels-vec (list->vector labels)]
+               [instr-length (pb-count-instrs bs)])
+            (let loop ([i 0] [remaining-labels labels] [rs (reverse relocs)] [rps rp-headers]) 
+                (cond
+                [(equal? i (bytes-length bs)) (void)]
+                [(<= (+ i pb-instruction-byte-size) (bytes-length bs))
+                    (let* 
+                        ([instr (read-instr bs i (pb-config-endian config))]
+                         [idx (quotient i pb-instruction-byte-size)]
+                         [is-label? (and (pair? remaining-labels)
+                                        (equal? i (label-offset (car remaining-labels))))]
+                         [is-reloc? (and (pair? rs) (equal? i (+ (cdr (first rs)) 12)))]
+                         [is-rp-header? (and (pair? rps)
+                                             (equal? i (caar rps)))])
+                         (if is-rp-header?
+                                (display 
+                                    (format "~a:\t rp-header\n" i))
+                                (display 
+                                    (format "~a:\t ~a\n" i 
+                                                        (disassemble instr idx labels-vec config))))
+                        
+                        ;(display (format "label-offset ~a\n" (label-offset (car remaining-labels))))
+                        (when is-label? 
+                            (display (format "\n\t.~a:\n" (label-name (car remaining-labels)))))
+                        
+                        (when is-reloc? 
+                            (display (format "~a:\t ~a\n" i (format-relocation (car (first rs))))))
+                        
+                        (let ([skip (cond
+                                        [(equal? (instr-op instr) pb-literal) word-size]
+                                        [is-rp-header? (- (cdar rps) pb-instruction-byte-size)]
+                                        [else 0])])
+                            (loop (+ i pb-instruction-byte-size skip)
+                                (if is-label? (cdr remaining-labels) remaining-labels)
+                                (if is-reloc? (cdr rs) rs)
+                                (if is-rp-header? (cdr rps) rps))))])))))
+
+                ; ; handle the case where a relocation point is at the address after the final instruction 
+                ; (unless (null? rs)
+                ;     (display (format "~a:\t ~a\n" (* instr-length pb-instruction-byte-size) 
+                ;                                                 (format-relocation (car (first rs)))))))))
                 
 (define (pb-count-instrs bs)
 	(unless (equal? (remainder (bytes-length bs) pb-instruction-byte-size) 0)
 		(error 'pb-disassemble "bad instruction format"))
 	(quotient (bytes-length bs) pb-instruction-byte-size))
-
-(define (format-label lbl-n)
-    (format "l~a" lbl-n))
 
 (define (make-labels targets)
     (define labels (make-vector (vector-length targets) ""))
@@ -918,6 +1047,9 @@
 	(display (string-append
 		(format "byte-length: ~a\n" (bytes-length bs))
 		(format "number of instructions: ~a\n" (pb-count-instrs bs))))
-	(display (disassemble-loop bs config relocations)))
+    (let-values ([(headers labels) (collect-headers-labels bs config (bytes-length bs))])
+        (display headers)
+        (display labels)
+	    (disassemble-loop bs config relocations)))
 
 ; TODO: Fill in other instruction variants
