@@ -2,15 +2,17 @@
 
 (require (for-syntax racket/syntax))
 (require racket/fixnum)
-
 (provide pb-disassemble pb-config)
 
 (define pb-instruction-byte-size 4)
 
-(define pb-binop-group-start 22)
+(define pb-nop 0)
+(define pb-literal 1)
 (define pb-mov-16-group-start 2)
 (define pb-mov-16-group-count 8)
 (define pb-mov-group-start 10)
+
+(define pb-binop-group-start 22)
 (define pb-cmp-group-start 74)
 (define pb-fp-binop-group-start 92)
 (define pb-unop-group-start 118)
@@ -21,21 +23,30 @@
 (define pb-st-group-start 184)
 (define pb-b-group-start 204)
 (define pb-b*-group-start 210)
-(define pb-nop 0)
-(define pb-literal 1)
 (define pb-return 213)
+(define pb-interp 214)
 (define pb-adr 215)
 
+(define relocation-offset 12)
+
+;; Note:
+;; Currently, every instruction is implemented except for the following:
+;; pb-call, pb-inc, pb-lock, pb-cas, pb-call-arena-{in, out}, pb-stack-call, pb-fence
+
 ;; PB instruction shapes. All instructions are 4 bytes in length
+;                   di/dr
 ;;  -----------------------------------------------
 ;;  |    op    |    reg    |     immed/reg        |
 ;;  -----------------------------------------------
+;;                 dri/drr
 ;;  -----------------------------------------------
 ;;  |    op    | reg | reg |     immed/reg        |
 ;;  -----------------------------------------------
+;;                 di
 ;;  -----------------------------------------------
 ;;  |    op    | reg |          immed             |
 ;;  -----------------------------------------------
+;;                  i
 ;;  -----------------------------------------------
 ;;  |    op    |             immed                |
 ;;  -----------------------------------------------
@@ -47,6 +58,7 @@
 ;;          where enum-fields is a list of symbols representing the fields
 ;; An instance of the struct called <enum-name>
 ;; A constant named each of field_1, ..., field_n for easy access to each of the enum fields
+
 (define-syntax (define/enum stx)
   (syntax-case stx ()
     [(_ name fields ...)
@@ -56,7 +68,6 @@
                         [instance-name (format-id stx "~a" (syntax-e #'name))]
                         [count-name (format-id stx "~a-count" (syntax-e #'name))])
             #`(begin
-                ;(display (format "name: ~a" (syntax->datum struct-name)))
                 (struct struct-name [enum-fields] #:transparent)
                 (define instance-name (struct-name '#,field-symbols))
                 (define-syntax count-name #,(length (syntax->datum #'(fields ... ))))
@@ -83,7 +94,7 @@
     [(_ enum-name)
         #`(length (enum-fields enum-name))]))
 
-;; PB instructions come in groups of different variants. For example, binops are defined as:
+;; PB instructions come in groups of different variants. For example, in the chez scheme backend, binops are defined as:
 ;; [pb-bin-op pb-signals pb-binaries pb-argument-types] 
 ;; where pb-signals is an enum representing each possible signal, pb-binaries is an enum representing each binop,
 ;; and pb-argument-types represents immediate or register variants. Taking the product of these options
@@ -93,12 +104,6 @@
 ;; a list of known enum options that have been multiplied to form the opcode, and we can repeatedly
 ;; take the modulus of the opcode and number of enum fields and "divide away" the number of enum fields
 ;; in order to figure out exactly which variant an opcode corresponds to.
-
-;; In the binop example, there are two pb-signal variants: true and false. Thus, after subtracting 
-;; off a base value, to determine whether an opcode signals or not we can simply take the opcode mod 2.
-;; Then, we can floor divide by 2 to collapse each signal variant to a single opcode, and we can continue this 
-;; mod/floor divide process for all the other listed enum variants to extract the other variant information.
-
 (define-syntax (deconstruct-op stx)
   (syntax-case stx ()
     [(_ op base [name enum] ... body)
@@ -158,20 +163,6 @@
     pb-single
     pb-double)
 
-(define pb-size-names
-    (vector
-        "int8"
-        "uint8"
-        "int16"
-        "uint16"
-        "int32"
-        "uint32"
-        "int64"
-        "uint64"
-        "single"
-        "double"
-))
-
 (define/enum pb-regs
     pb-reg-tc
     pb-reg-sfp
@@ -198,22 +189,7 @@
     pb-reg-fp7
     pb-reg-fp8)
 
-(define pb-mov-type-names
-    (vector
-        "i->i"
-        "d->d"
-        "i->d"
-        "d->i"
-        "s->d"
-        "d->s"
-        "d->s->d"
-        "i-bits->d-bits"
-        "d-bits->i-bits"
-        "i-i-bits->d-bits"
-        "d-lo-bits->i-bits"
-        "d-hi-bits->i-bits"))
-
-  (define/enum pb-binaries
+(define/enum pb-binaries
     pb-add
     pb-sub
     pb-mul
@@ -228,14 +204,54 @@
     pb-asr
     pb-lslo)
 
-  (define/enum pb-unaries
+(define/enum pb-unaries
     pb-not
     pb-sqrt)
 
-  (define/enum pb-branches
+(define/enum pb-branches
     pb-fals
     pb-true
     pb-always)
+
+(define/enum pb-cmp-ops
+    pb-eq
+    pb-lt
+    pb-gt
+    pb-le
+    pb-ge
+    pb-ab
+    pb-bl
+    pb-cs
+    pb-cc)
+
+(define pb-size-names
+    (vector
+        "int8"
+        "uint8"
+        "int16"
+        "uint16"
+        "int32"
+        "uint32"
+        "int64"
+        "uint64"
+        "single"
+        "double"
+))
+
+(define pb-mov-type-names
+    (vector
+        "i->i"
+        "d->d"
+        "i->d"
+        "d->i"
+        "s->d"
+        "d->s"
+        "d->s->d"
+        "i-bits->d-bits"
+        "d-bits->i-bits"
+        "i-i-bits->d-bits"
+        "d-lo-bits->i-bits"
+        "d-hi-bits->i-bits"))
 
 (define pb-binop-names
     (vector
@@ -270,17 +286,6 @@
         "btrue"
         "b"))
 
-(define/enum pb-cmp-ops
-    pb-eq
-    pb-lt
-    pb-gt
-    pb-le
-    pb-ge
-    pb-ab
-    pb-bl
-    pb-cs
-    pb-cc)
-
 (define pb-cmp-names 
     (vector
         "eq"
@@ -296,33 +301,37 @@
 (define pb-fp-cmp-op-names
     (vector-map (lambda (n) (format "fp-~a" n)) pb-cmp-names))
 
-(define reg-names (vector
-                "tc"
-                "sfp"
-                "ap"
-                "trap"
-                "ac0"
-                "xp"
-                "ts"
-                "td"
-                "cp"
-                "r9"
-                "r10"
-                "r11"
-                "r12"
-                "r13"
-                "r14"
-                "r15"))
+(define reg-names
+    (vector
+        "tc"
+        "sfp"
+        "ap"
+        "trap"
+        "ac0"
+        "xp"
+        "ts"
+        "td"
+        "cp"
+        "r9"
+        "r10"
+        "r11"
+        "r12"
+        "r13"
+        "r14"
+        "r15"))
 
-(define fp-reg-names (vector
-    "fp1"
-    "fp2"
-    "fp3"
-    "fp4"
-    "fp5"
-    "fp6"
-    "fp7"
-    "fp8"))
+(define fp-reg-names 
+    (vector
+        "fp1"
+        "fp2"
+        "fp3"
+        "fp4"
+        "fp5"
+        "fp6"
+        "fp7"
+        "fp8"))
+
+;; Helpers for formatting instructions
 
 (define (format-instr-parts op-name properties)
     (format "(~s ~s)" op-name (string-join properties " ")))
@@ -412,6 +421,7 @@
                     (format-imm imm im-sz sgn?)
                     (format-label-imm label imm im-sz sgn?))))
 
+; Properties which may be associated with an instruction
 (struct zero/keep [zk])
 (struct shift [s])
 (struct mov-type [mt])
@@ -437,6 +447,7 @@
         (list (zero/keep zk)
               (shift s))))
 
+; Utilities for decoding pb instructions
 (define (decode/pb-mov16 instr)
     (let* ([op (instr-op instr)]
            [rel (- op pb-mov-16-group-start)]
@@ -447,42 +458,37 @@
            (format/pb-mov16 shift zero/keep reg imm)))
 
 (define (decode/pb-mov instr)
-    (let*
-        ([op (instr-op instr)]
-         [rel (- op pb-mov-group-start)]
-         [movt (remainder rel (enum-field-count pb-mov-types))]
-         [reg (instr-dr-reg instr)]
-         [dst (instr-dr-dest instr)])
-         (cond 
+    (deconstruct-op (instr-op instr) pb-mov-group-start
+        [movt pb-mov-types]
+        (cond 
             [(equal? mov-type pb-i-i-bits->d-bits)
                 "(unsupported)"]
-            [else (format-instr/dr "mov" dst reg (list (mov-type movt)))])))
+            [else 
+                (format-instr/dr "mov" 
+                        (instr-dr-dest instr) 
+                        (instr-dr-reg instr) 
+                        (list (mov-type movt)))])))
 
 (define (decode/pb-binop instr)
-    (let*
-        ([op (instr-op instr)])
-
-        (deconstruct-op op pb-binop-group-start 
+        (deconstruct-op (instr-op instr) pb-binop-group-start 
                 [drr/dri pb-argument-types] 
                 [op-kind pb-binaries]
                 [sig pb-signal-types]
-         (cond
-            ; drr
-            [(equal? drr/dri 0) 
-                (format-instr/drr 
-                    (vector-ref pb-binop-names op-kind)
-                    (instr-drr-dest instr)
-                    (instr-drr-reg1 instr)
-                    (instr-drr-reg2 instr)
-                    (list (signal sig)))]
-            ; dri
-            [(equal? drr/dri 1)
-                (format-instr/dri 
-                    (vector-ref pb-binop-names op-kind)
-                    (instr-dri-dest instr)
-                    (instr-dri-reg instr)
-                    (instr-dri-imm instr)
-                    (list (signal sig)))]))))
+            (cond
+                [(equal? drr/dri pb-register) 
+                    (format-instr/drr 
+                        (vector-ref pb-binop-names op-kind)
+                        (instr-drr-dest instr)
+                        (instr-drr-reg1 instr)
+                        (instr-drr-reg2 instr)
+                        (list (signal sig)))]
+                [(equal? drr/dri pb-immediate)
+                    (format-instr/dri 
+                        (vector-ref pb-binop-names op-kind)
+                        (instr-dri-dest instr)
+                        (instr-dri-reg instr)
+                        (instr-dri-imm instr)
+                        (list (signal sig)))])))
 
 (define (decode/pb-fp-unop instr)
     (deconstruct-op (instr-op instr) pb-fp-unop-group-start
@@ -504,15 +510,13 @@
            [op-kind (remainder (quotient rel (enum-field-count pb-argument-types)) 
                                             (enum-field-count pb-cmp-ops))])
         (cond 
-            ; dr
-            [(equal? dr/di 0) 
+            [(equal? dr/di pb-register) 
                 (format-instr/dr 
                     (vector-ref pb-cmp-names op-kind)
                     (instr-dr-dest instr)
                     (instr-dr-reg instr)
                     '())]
-            ; di
-            [(equal? dr/di 1) 
+            [(equal? dr/di pb-immediate) 
                 (format-instr/di
                     (vector-ref pb-cmp-names op-kind)
                     (instr-di-dest instr)
@@ -629,6 +633,8 @@
                         '()
                         (list fp #f #f))]))))
 
+; simple binary search used for searching
+; through a list of labels sorted by offset
 (define (bsearch cmp vec e start end)
   (if (< start end)
       (let*
@@ -658,6 +664,8 @@
                     (instr-dr-reg instr))]
             [(equal? r/i pb-immediate)
                 (let* ([target (+ (* pb-instruction-byte-size (+ 1 i)) (get-branch-target instr))]
+                        ; perform a binary search to attempt to find a label associated 
+                        ; with the current offset in our list of collected labels
                        [label (bsearch cmp-label-offset labels target 0 (vector-length labels))])
                        (format-instr/i
                             (vector-ref pb-branch-names b-type)
@@ -699,8 +707,10 @@
 (define (decode/pb-return-op instr)
     "(return)")
 
-; (define (decode/pb-call-op instr)
-;     "(call)")
+(define (decode/pb-interp-op instr)
+    (format-instr/d  "interp" (instr-d-dest instr)))
+
+; Helpers for extracting components of a pb instruction. Taken from ChezScheme's pbchunk.ss
 
 (define (instr-op instr) (bitwise-and instr #xFF))
 
@@ -712,8 +722,7 @@
 (define (instr-di-dest instr) (instr-d-dest instr))
 (define (instr-di-imm instr) (arithmetic-shift instr -16))
 
-;                     7    0 
-; | imm         | r1  | op |
+
 (define (instr-adr-dest instr) (instr-di-dest instr))
 (define (instr-adr-imm instr) (arithmetic-shift instr -12))
 
@@ -726,38 +735,6 @@
 (define (instr-dri-imm instr) (arithmetic-shift instr -16))
 
 (define (instr-i-imm instr) (arithmetic-shift instr -8))
-
-
-#|
-(define-pb-opcode
-    [pb-nop]
-    [pb-literal]
-    [pb-mov16 pb-keeps pb-shifts]
-    [pb-mov pb-move-types]
-    [pb-bin-op pb-signals pb-binaries pb-argument-types]
-    [pb-cmp-op pb-compares pb-argument-types]
-    [pb-fp-bin-op pb-binaries pb-argument-types]
-    [pb-un-op pb-unaries pb-argument-types]
-    [pb-fp-un-op pb-unaries pb-argument-types]
-    [pb-fp-cmp-op pb-compares pb-argument-types]
-    [pb-rev-op pb-sizes pb-argument-types]
-    [pb-ld-op pb-sizes pb-argument-types]
-    [pb-st-op pb-sizes pb-argument-types]
-    [pb-b-op pb-branches pb-argument-types]
-    [pb-b*-op pb-argument-types]
-    [pb-call]
-    [pb-return]
-    [pb-interp]
-    [pb-adr]
-    [pb-inc pb-argument-types]
-    [pb-lock]
-    [pb-cas]
-    [pb-call-arena-in] [pb-call-arena-out]
-    [pb-fp-call-arena-in] [pb-fp-call-arena-out]
-    [pb-stack-call]
-    [pb-fence pb-fences]
-    [pb-chunk])|#
-
 
 #|
 In Chez Scheme, the rp-header and rp-compact-header structures are defined as follows:
@@ -776,7 +753,8 @@ Assuming that sizeof(uptr) = sizeof(ptr) = sizeof(iptr) = machine word size,
 We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header) = 2*(word size)
 |#
 
-
+; Sizes for chez scheme rp headers. We need these to be able to separate
+; the headers from the instruction stream
 (define size-rp-compact-header 2)
 (define size-rp-header 4)
 
@@ -796,7 +774,9 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
            [deduped (remove-duplicates sorted)])
            (reverse (foldl (lambda (offset lst) (cons (new-label offset (length lst)) lst))  '() deduped))))
 
-; note: adapted from chez scheme pbchunk.ss
+; note: adapted from Chez Scheme pbchunk.ss
+; helper to collect rp headers and labels (branch targets) from
+; the instruction stream. 
 (define (collect-headers-labels bs config len)
   (define word-size (native-word-size (pb-config-bits config)))
   (let loop ([i 0] [headers '()] [labels '()])
@@ -856,6 +836,8 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
             [(equal? (instr-op instr) pb-literal) (next/literal)]
             [else (next)]))])))
 
+; helper predicate to determine if an instruction is a branch with immediate. We are only interested
+; in these for determining branch targets within the current function we are disassembling
 (define (is-branch-imm? instr)
     (if (in-range (instr-op instr) pb-b-group-start 
             (+ pb-b-group-start 
@@ -868,33 +850,6 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
 
 (define (get-branch-target b-imm-instr)
     (s-ext (instr-i-imm b-imm-instr) 24))
-
-(define (collect-jump-targets instrs)
-    (define branch-targets (make-vector (pb-count-instrs instrs) 0))
-    (for-each-instr (instr-idx instr) (in-instr-bytes instrs 'little)
-        (when (is-branch-imm? instr)
-            (let* ([offset (quotient (get-branch-target instr) pb-instruction-byte-size)]
-                    [target (+ instr-idx offset)])
-                (when (in-range target 0 (vector-length branch-targets))
-                    (vector-set! branch-targets target 1)))))
-    branch-targets)
-
-(define-syntax (for-each-instr stx)
-  (syntax-case stx (in-instr-bytes)
-    [(_ (idx instr) (in-instr-bytes bs endian) body ...)
-       #'(let loop ([i 0]) 
-         (cond
-           [(equal? i (bytes-length bs)) (void)]
-           [(<= (+ i pb-instruction-byte-size) (bytes-length bs))
-            (begin
-              (define instr-bytes (subbytes bs i (+ i pb-instruction-byte-size)))
-              (define instr (bytes->instr instr-bytes endian))
-              (define idx (quotient i pb-instruction-byte-size))
-              (define inc (if (equal? (instr-op instr) pb-literal) 3 1))
-              
-              body ...
-              (loop (+ i (* inc pb-instruction-byte-size))))]))]
-         [else (error 'pb-disassemble "bad instruction format")]))
 
 (define (bytes->instr-little-endian instr-bytes)
 	(bitwise-ior 
@@ -920,6 +875,7 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
         [(_ x a b)
             #'(and (<= a x) (< x b))]))
 
+; this is useful as a default for any instructions that are not yet supported
 (define (pb-print-skeleton-instr instr)
 		(format "(opcode: ~a ...)" (instr-op instr)))
 
@@ -935,7 +891,6 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
         [(equal? sz '64) 8]
         [else (error 'pb-dissassemble "invalid word size ~a" sz)]))
 
-; TODO: Clean up range checking logic here?
 (define (disassemble instr instr-idx labels config)
         (cond
             [(in-range (instr-op instr) pb-mov-16-group-start (+ pb-mov-16-group-start (sub1 pb-mov-16-group-count)))
@@ -971,8 +926,13 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
                                                         (literal-word-size (pb-config-bits config)))]
             [(equal? (instr-op instr) pb-return) (decode/pb-return-op instr)]
             [(equal? (instr-op instr) pb-adr) (decode/pb-adr-op instr)]
+            [(equal? (instr-op instr) pb-interp) (decode/pb-interp-op instr)]
             [else (pb-print-skeleton-instr instr)]))
 
+
+
+; A given pb machine has a word size (32 or 64 bit), an endianness, and may or may not
+; have threading support
 (struct pb-config ([bits] [endian] [threaded?]) #:transparent)
 
 (define (format-relocation name)
@@ -984,72 +944,65 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
         (let*
               ([labels-vec (list->vector labels)]
                [instr-length (pb-count-instrs bs)])
-            (let loop ([i 0] [remaining-labels labels] [rs (reverse relocs)] [rps rp-headers]) 
-                (cond
-                [(equal? i (bytes-length bs)) (void)]
-                [(<= (+ i pb-instruction-byte-size) (bytes-length bs))
-                    (let* 
-                        ([instr (read-instr bs i (pb-config-endian config))]
-                         [idx (quotient i pb-instruction-byte-size)]
-                         [is-label? (and (pair? remaining-labels)
-                                        (equal? i (label-offset (car remaining-labels))))]
-                         [is-reloc? (and (pair? rs) (equal? i (+ (cdr (first rs)) 12)))]
-                         [is-rp-header? (and (pair? rps)
-                                             (equal? i (caar rps)))])
-                         (if is-rp-header?
-                                (display 
-                                    (format "~a:\t rp-header\n" i))
-                                (display 
-                                    (format "~a:\t ~a\n" i 
-                                                        (disassemble instr idx labels-vec config))))
-                        
-                        ;(display (format "label-offset ~a\n" (label-offset (car remaining-labels))))
-                        (when is-label? 
-                            (display (format "\n\t.~a:\n" (label-name (car remaining-labels)))))
-                        
-                        (when is-reloc? 
-                            (display (format "~a:\t ~a\n" i (format-relocation (car (first rs))))))
-                        
-                        (let ([skip (cond
-                                        [(equal? (instr-op instr) pb-literal) word-size]
-                                        [is-rp-header? (- (cdar rps) pb-instruction-byte-size)]
-                                        [else 0])])
-                            (loop (+ i pb-instruction-byte-size skip)
-                                (if is-label? (cdr remaining-labels) remaining-labels)
-                                (if is-reloc? (cdr rs) rs)
-                                (if is-rp-header? (cdr rps) rps))))])))))
+               
+            (let-values ([(remaining-relocs remaining-rps) 
+                (let loop ([i 0] [remaining-labels labels] [rs (reverse relocs)] [rps rp-headers]) 
+                    (cond
+                        [(equal? i (bytes-length bs)) (values rs rps)]
+                        [(<= (+ i pb-instruction-byte-size) (bytes-length bs))
+                            (let* 
+                                ([instr (read-instr bs i (pb-config-endian config))]
+                                [idx (quotient i pb-instruction-byte-size)]
+                                [is-label? (and (pair? remaining-labels)
+                                                (equal? i (label-offset (car remaining-labels))))]
+                                ; we want to display relocations at an offset of {} away from 
+                                ; their listed address
+                                [is-reloc? (and (pair? rs) (equal? i (+ (cdr (first rs)) relocation-offset)))]
+                                [is-rp-header? (and (pair? rps)
+                                                    (equal? i (caar rps)))])
+                                
+                                ; rp headers are placeholders which Chez Scheme inserts into
+                                ; the instruction stream. They are non-instruction data and must
+                                ; be treated as such
+                                (if is-rp-header?
+                                        (display 
+                                            (format "~a:\t rp-header\n" i))
+                                        (display 
+                                            (format "~a:\t ~a\n" i 
+                                                                (disassemble instr idx labels-vec config))))
+                                
+                                (when is-label? 
+                                    (display (format "\n\t.~a:\n" (label-name (car remaining-labels)))))
+                                
+                                (when is-reloc? 
+                                    (display (format "~a:\t ~a\n" i (format-relocation (car (first rs))))))
+                                
+                                (let ([skip (cond
+                                                ; literal instructions contain an extra
+                                                ; data word after the instruction which
+                                                ; must be skipped over
+                                                [(equal? (instr-op instr) pb-literal) word-size]
 
-                ; ; handle the case where a relocation point is at the address after the final instruction 
-                ; (unless (null? rs)
-                ;     (display (format "~a:\t ~a\n" (* instr-length pb-instruction-byte-size) 
-                ;                                                 (format-relocation (car (first rs)))))))))
-                
+                                                ; if the current instruction is at the start of an rp header,
+                                                ; we must skip over a number of bytes equal to its size
+                                                [is-rp-header? (- (cdar rps) pb-instruction-byte-size)]
+                                                [else 0])])
+                                    (loop (+ i pb-instruction-byte-size skip)
+                                        (if is-label? (cdr remaining-labels) remaining-labels)
+                                        (if is-reloc? (cdr rs) rs)
+                                        (if is-rp-header? (cdr rps) rps))))]))])
+
+            ; handle the case where a relocation point is at the address after the final instruction 
+            (unless (null? remaining-relocs)
+                (display (format "~a:\t ~a\n" (bytes-length bs) (format-relocation (caar remaining-relocs)))))))))
+
 (define (pb-count-instrs bs)
 	(unless (equal? (remainder (bytes-length bs) pb-instruction-byte-size) 0)
 		(error 'pb-disassemble "bad instruction format"))
 	(quotient (bytes-length bs) pb-instruction-byte-size))
 
-(define (make-labels targets)
-    (define labels (make-vector (vector-length targets) ""))
-    (let loop ([i 0] [label-count 0])
-        (when (< i (vector-length targets))
-            (if (equal? (vector-ref targets i) 1)
-                (begin 
-                    (vector-set! labels i (format-label label-count))
-                    (loop (+ i 1) (+ label-count 1)))
-                (loop (+ i 1) label-count))))
-    labels)
-
 (define (pb-disassemble bs config relocations)
-    (display (format "pb config: ~a" config))
 	(unless (bytes? bs)
-		(error 'pb-disassemble "unexpected input type"))
-	(display (string-append
-		(format "byte-length: ~a\n" (bytes-length bs))
-		(format "number of instructions: ~a\n" (pb-count-instrs bs))))
+		(error 'pb-disassemble "unexpected input"))
     (let-values ([(headers labels) (collect-headers-labels bs config (bytes-length bs))])
-        (display headers)
-        (display labels)
 	    (disassemble-loop bs config relocations)))
-
-; TODO: Fill in other instruction variants

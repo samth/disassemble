@@ -212,7 +212,6 @@
 
 ;; #f for arch is "auto-detect"
 (define (disassemble f #:program [prog #f] #:arch [arch #f])
-	(display (format "detected arch: ~a\n" (detect-arch)))
   (disassemble-bytes (go 'disassemble f)
                      #:program prog #:arch arch
                      #:relocations (extract-relocations f)))
@@ -228,7 +227,6 @@
                            ;; `relocations` is (list (cons <obj> <offset>) ...)
                            #:relocations [relocations '()])
   (let ([arch (or arch (detect-arch))])
-	(display (format "here: arch is ~a\n" arch))
     (case prog
       [(nasm) (display (nasm-disassemble bs))]
       [else
@@ -238,7 +236,6 @@
                                         (let ([p (car relocations)])
                                         (mcons (mcons (cdr p) (car p))
                                                 (loop (cdr relocations))))))
-        (print (format "relocations are: ~a\n" relocations))
         (cond
             [(pb-arch? (symbol->string arch))
                 (pb-disassemble bs (get-pb-config (symbol->string arch)) relocations)]
