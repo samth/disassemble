@@ -55,4 +55,4 @@ file:
 Patches, uses, complaints, and suggestions are all welcome.
 
 The disassembly code (when not using NASM) is taken from Göran
-Weinholt's [_Industria_ library](http://github.com/weinholt/industria).
+Weinholt's [_Machine Code_ library](https://gitlab.com/weinholt/machine-code).
