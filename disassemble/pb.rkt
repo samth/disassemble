@@ -27,8 +27,6 @@
 (define pb-interp 214)
 (define pb-adr 215)
 
-(define relocation-offset 12)
-
 ;; Note:
 ;; Currently, every instruction is implemented except for the following:
 ;; pb-call, pb-inc, pb-lock, pb-cas, pb-call-arena-{in, out}, pb-stack-call, pb-fence
@@ -949,13 +947,19 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
 (define (pad-instr instr)
     (pad (format "~x" instr) 8 48))
 
-(define (disassemble-data bs config i len)
-    (let loop ([i i] [end (+ i len)])
-        (when (< i end)
-            (let ([instr (read-instr bs i (pb-config-endian config))])
+(define (disassemble-data bs config i len relocs)
+    (let loop ([i i] [end (+ i len)] [rs relocs])
+        (if (< i end)
+            (let*  ([instr (read-instr bs i (pb-config-endian config))]
+                    [is-reloc? (and (pair? rs) (equal? i (+ (cdr (first rs)))))]
+                    [reloc-disp (if is-reloc? 
+                                        (format "~a" (format-relocation (car (first rs))))
+                                            "")])
             (display 
-                (format "~a:\t~a\t(data)\n" (pad-index i) (pad-instr instr)))
-            (loop (+ i pb-instruction-byte-size) end)))))
+                (format "~a:\t~a\t(data)\t\t~a\n" (pad-index i) (pad-instr instr) reloc-disp))
+            (loop (+ i pb-instruction-byte-size) end 
+                        (if is-reloc? (cdr rs) rs)))
+            rs)))
 
 (define (disassemble-loop bs config relocs) 
     (define word-size (native-word-size (pb-config-bits config)))
@@ -964,10 +968,9 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
               ([labels-vec (list->vector labels)]
                [instr-length (pb-count-instrs bs)])
                
-            (let-values ([(remaining-relocs remaining-rps) 
                 (let loop ([i 0] [remaining-labels labels] [rs (reverse relocs)] [rps rp-headers]) 
                     (cond
-                        [(equal? i (bytes-length bs)) (values rs rps)]
+                        [(equal? i (bytes-length bs)) (void)]
                         [(<= (+ i pb-instruction-byte-size) (bytes-length bs))
                             (let* 
                                 ([instr (read-instr bs i (pb-config-endian config))]
@@ -976,33 +979,26 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
                                                 (equal? i (label-offset (car remaining-labels))))]
                                 ; we want to display relocations at an offset of {} away from 
                                 ; their listed address
-                                [is-reloc? (and (pair? rs) (equal? i (+ (cdr (first rs)) relocation-offset)))]
+                                [is-reloc? (and (pair? rs) (equal? i (+ (cdr (first rs)))))]
                                 [is-rp-header? (and (pair? rps)
                                                     (equal? i (caar rps)))])
-
+                                
                                 (when is-label? 
                                     (display (format "\n.~a:\n" (label-name (car remaining-labels)))))
-                                
-                                (define reloc-disp 
-                                    (if is-reloc? 
-                                        (format "~a" (format-relocation (car (first rs))))
-                                        ""))
                                 
                                 ; rp headers are placeholders which Chez Scheme inserts into
                                 ; the instruction stream. They are non-instruction data and must
                                 ; be treated as such
                                 (if is-rp-header?
                                         (display 
-                                            (format "~a:\t~a\trp-header\t~a\n" 
+                                            (format "~a:\t~a\trp-header\n" 
                                                 (pad-index i)
-                                                (pad-instr instr)
-                                                reloc-disp))
+                                                (pad-instr instr)))
                                         (display 
-                                            (format "~a:\t~a\t~a\t~a\n" 
+                                            (format "~a:\t~a\t~a\n" 
                                                 (pad-index i)
                                                 (pad-instr instr)
-                                                (disassemble instr idx labels-vec config)
-                                                                        reloc-disp)))
+                                                (disassemble instr idx labels-vec config))))
 
                                 (let ([skip (cond
                                                 ; literal instructions contain an extra
@@ -1015,18 +1011,17 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
                                                 [is-rp-header? (- (cdar rps) pb-instruction-byte-size)]
                                                 [else 0])])
                                         
-                                        (when (> skip 0)
-                                            (disassemble-data bs config (+ i pb-instruction-byte-size) skip))
+                                        (define remaining-relocs 
+                                            (if (> skip 0)
+                                                (disassemble-data bs config (+ i pb-instruction-byte-size) skip rs)
+                                                rs))
 
                                     (loop (+ i pb-instruction-byte-size skip)
                                         (if is-label? (cdr remaining-labels) remaining-labels)
-                                        (if is-reloc? (cdr rs) rs)
-                                        (if is-rp-header? (cdr rps) rps))))]))])
+                                        remaining-relocs
+                                        (if is-rp-header? (cdr rps) rps))))])))))
 
-            ; handle the case where a relocation point is at the address after the final instruction 
-            (unless (null? remaining-relocs)
-                (display (format "~a: ~a\n\n" (pad-index (bytes-length bs)) 
-                            (format-relocation (caar remaining-relocs)))))))))
+ 
 
 (define (pb-count-instrs bs)
 	(unless (equal? (remainder (bytes-length bs) pb-instruction-byte-size) 0)
