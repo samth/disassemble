@@ -186,7 +186,14 @@
                                     [(regexp-match? #rx#"x86_64" sp) 'x86_64]
                                     [(regexp-match? #rx#"aarch64" sp) 'aarch64]
                                     [else sp]))])
-                 (system-type 'target-machine)))
+
+    (let ([sys-target-type (system-type 'target-machine)])
+        ; first check target machine type in case we are targeting pb,
+        ; in which case (system-type 'arch) will return the underlying
+        ; machine arch and not the targeted pb variant
+            (if (pb-arch? (symbol->string sys-target-type))
+                sys-target-type
+                (system-type 'arch)))))
   (cond
     [(equal? arch 'i386) 'x86-32]
     [(equal? arch 'x86_64) 'x86-64]
@@ -195,10 +202,10 @@
     [else (error 'disassemble "unsupported architecture: ~s" arch)]))
 
 (define (pb-arch? arch)
-    (regexp-match? #rx#"^(t?)pb((?>32|64)?)(l?)$" arch))
+    (regexp-match? #rx#"^(t?)pb((?>32|64)?)((?>b|l)?)$" arch))
 
 (define (get-pb-config pb-arch)
-    (let ([parts (regexp-match #rx#"^(t?)pb((?>32|64)?)(l?)$" pb-arch)])
+    (let ([parts (regexp-match #rx#"^(t?)pb((?>32|64)?)((?>b|l)?)$" pb-arch)])
     (if parts
         (let
             ([t (second parts)]
@@ -206,7 +213,7 @@
              [l (fourth parts)])
             (pb-config
                 (if (equal? bits #"32") '32 '64)
-                (if (equal? l #"l") 'little 'big)
+                (if (equal? l #"b") 'big 'little)
                 (not (equal? t #""))))
         #f)))
 
@@ -230,12 +237,7 @@
     (case prog
       [(nasm) (display (nasm-disassemble bs))]
       [else
-        (let loop ([relocations relocations])
-                                    (if (null? relocations)
-                                        '()
-                                        (let ([p (car relocations)])
-                                        (mcons (mcons (cdr p) (car p))
-                                                (loop (cdr relocations))))))
+
         (cond
             [(pb-arch? (symbol->string arch))
                 (pb-disassemble bs (get-pb-config (symbol->string arch)) relocations)]
@@ -244,7 +246,12 @@
 								(get-disassembler arch)
 								color #f 0 '()
 								;; Convert relocations to mutable-pair associations:
-								
+                                (let loop ([relocations relocations])
+                                    (if (null? relocations)
+                                        '()
+                                        (let ([p (car relocations)])
+                                        (mcons (mcons (cdr p) (car p))
+                                                (loop (cdr relocations))))))
 								;; recognize instruction-pointer register:
 								(case arch
 									[(x86-32) (lambda (x) (eq? x 'eip))]

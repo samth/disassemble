@@ -929,14 +929,33 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
             [(equal? (instr-op instr) pb-interp) (decode/pb-interp-op instr)]
             [else (pb-print-skeleton-instr instr)]))
 
-
-
 ; A given pb machine has a word size (32 or 64 bit), an endianness, and may or may not
 ; have threading support
 (struct pb-config ([bits] [endian] [threaded?]) #:transparent)
 
 (define (format-relocation name)
     (format "(relocation ~a)" name))
+
+(define (pad s len [p 32])
+        (if (>= (string-length s) len)
+            s
+            ; front pad with p
+            (string-append (build-string (- len (string-length s))
+                (lambda (_) (integer->char p))) s)))
+
+(define (pad-index i)
+    (pad (format "~a" i) 6))
+
+(define (pad-instr instr)
+    (pad (format "~x" instr) 8 48))
+
+(define (disassemble-data bs config i len)
+    (let loop ([i i] [end (+ i len)])
+        (when (< i end)
+            (let ([instr (read-instr bs i (pb-config-endian config))])
+            (display 
+                (format "~a:\t~a\t(data)\n" (pad-index i) (pad-instr instr)))
+            (loop (+ i pb-instruction-byte-size) end)))))
 
 (define (disassemble-loop bs config relocs) 
     (define word-size (native-word-size (pb-config-bits config)))
@@ -960,23 +979,31 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
                                 [is-reloc? (and (pair? rs) (equal? i (+ (cdr (first rs)) relocation-offset)))]
                                 [is-rp-header? (and (pair? rps)
                                                     (equal? i (caar rps)))])
+
+                                (when is-label? 
+                                    (display (format "\n.~a:\n" (label-name (car remaining-labels)))))
+                                
+                                (define reloc-disp 
+                                    (if is-reloc? 
+                                        (format "~a" (format-relocation (car (first rs))))
+                                        ""))
                                 
                                 ; rp headers are placeholders which Chez Scheme inserts into
                                 ; the instruction stream. They are non-instruction data and must
                                 ; be treated as such
                                 (if is-rp-header?
                                         (display 
-                                            (format "~a:\t rp-header\n" i))
+                                            (format "~a:\t~a\trp-header\t~a\n" 
+                                                (pad-index i)
+                                                (pad-instr instr)
+                                                reloc-disp))
                                         (display 
-                                            (format "~a:\t ~a\n" i 
-                                                                (disassemble instr idx labels-vec config))))
-                                
-                                (when is-label? 
-                                    (display (format "\n\t.~a:\n" (label-name (car remaining-labels)))))
-                                
-                                (when is-reloc? 
-                                    (display (format "~a:\t ~a\n" i (format-relocation (car (first rs))))))
-                                
+                                            (format "~a:\t~a\t~a\t~a\n" 
+                                                (pad-index i)
+                                                (pad-instr instr)
+                                                (disassemble instr idx labels-vec config)
+                                                                        reloc-disp)))
+
                                 (let ([skip (cond
                                                 ; literal instructions contain an extra
                                                 ; data word after the instruction which
@@ -987,6 +1014,10 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
                                                 ; we must skip over a number of bytes equal to its size
                                                 [is-rp-header? (- (cdar rps) pb-instruction-byte-size)]
                                                 [else 0])])
+                                        
+                                        (when (> skip 0)
+                                            (disassemble-data bs config (+ i pb-instruction-byte-size) skip))
+
                                     (loop (+ i pb-instruction-byte-size skip)
                                         (if is-label? (cdr remaining-labels) remaining-labels)
                                         (if is-reloc? (cdr rs) rs)
@@ -994,7 +1025,8 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
 
             ; handle the case where a relocation point is at the address after the final instruction 
             (unless (null? remaining-relocs)
-                (display (format "~a:\t ~a\n" (bytes-length bs) (format-relocation (caar remaining-relocs)))))))))
+                (display (format "~a: ~a\n\n" (pad-index (bytes-length bs)) 
+                            (format-relocation (caar remaining-relocs)))))))))
 
 (define (pb-count-instrs bs)
 	(unless (equal? (remainder (bytes-length bs) pb-instruction-byte-size) 0)
