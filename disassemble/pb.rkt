@@ -342,15 +342,13 @@
 
 (define (format-prop prop)
   (match prop
-    [(zero/keep zk) (format "#:zk ~a" zk)]
+    [(zero/keep zk) (if (equal? zk keep-bits) "#:keep-bits #t" "")]
     [(shift s) (if (> s 0) (format "#:shift ~a" s) "")]
-    [(mov-type mt) (format "#:mov-type ~a" (vector-ref pb-mov-type-names mt))]
+    [(mov-type mt)
+     (if (not (member mt (list pb-i->i pb-d->d)))
+         (format "#:mov-type ~a" (vector-ref pb-mov-type-names mt))
+         "")]
     [(signal s) (if (equal? s pb-signal) "#:signal #t" "")]))
-
-(define (format-zero/keep z/k)
-  (match z/k
-    [pb-zero-bits "zero"]
-    [pb-keep-bits "keep"]))
 
 (define (format/pb-mov16 s zk reg imm)
   (format-instr/di "mov-16" reg imm (list (zero/keep zk) (shift s))))
@@ -403,10 +401,11 @@
    [op-kind pb-unaries]
    (cond
      [(equal? dr/di pb-register)
-      (format-instr/dr (vector-ref pb-fp-unop-names (instr-op instr))
+      (format-instr/dr (vector-ref pb-fp-unop-names op-kind)
                        (instr-dr-dest instr)
                        (instr-dr-reg instr)
-                       '())]
+                       '()
+                       '(#t #t))]
      [else (error 'pb-disassemble "floating-point instruction cannot have dri variant")])))
 
 (define (decode/pb-cmp instr)
