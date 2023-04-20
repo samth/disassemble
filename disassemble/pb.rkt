@@ -27,6 +27,7 @@
 (define pb-return 213)
 (define pb-interp 214)
 (define pb-adr 215)
+(define pb-chunk 228)
 
 ;; Note:
 ;; Currently, every instruction is implemented except for the following:
@@ -256,63 +257,68 @@
   (format "(offset #x~x)" off))
 
 (define (format-props props)
-  (string-join (map format-prop props)))
+  (string-join (filter non-empty-string? (map format-prop props))))
 
 (define (format-instr/dri op-name dest reg imm props [is-fp? '(#f #f #f)])
-  (if (null? props)
-      (format "(~a ~a ~a ~a)"
-              op-name
-              (format-reg dest (first is-fp?))
-              (format-reg reg (second is-fp?))
-              (format-imm imm 0 #f))
-      (format "(~a ~a ~a ~a ~a)"
-              op-name
-              (format-reg dest (first is-fp?))
-              (format-reg reg (second is-fp?))
-              (format-imm imm 0 #f)
-              (format-props props))))
+  (let ([fmt-props (format-props props)])
+    (if (equal? fmt-props "")
+        (format "(~a ~a ~a ~a)"
+                op-name
+                (format-reg dest (first is-fp?))
+                (format-reg reg (second is-fp?))
+                (format-imm imm 0 #f))
+        (format "(~a ~a ~a ~a ~a)"
+                op-name
+                (format-reg dest (first is-fp?))
+                (format-reg reg (second is-fp?))
+                (format-imm imm 0 #f)
+                (format-props props)))))
 
 (define (format-instr/dir op-name dest reg imm props [is-fp? '(#f #f #f)])
-  (if (null? props)
-      (format "(~a ~a ~a ~a)"
-              op-name
-              (format-reg dest (first is-fp?))
-              (format-imm imm 0 #f)
-              (format-reg reg (second is-fp?)))
-      (format "(~a ~a ~a ~a ~a)"
-              op-name
-              (format-reg dest (first is-fp?))
-              (format-imm imm 0 #f)
-              (format-reg reg (second is-fp?))
-              (format-props props))))
+  (let ([fmt-props (format-props props)])
+    (if (equal? fmt-props "")
+        (format "(~a ~a ~a ~a)"
+                op-name
+                (format-reg dest (first is-fp?))
+                (format-imm imm 0 #f)
+                (format-reg reg (second is-fp?)))
+        (format "(~a ~a ~a ~a ~a)"
+                op-name
+                (format-reg dest (first is-fp?))
+                (format-imm imm 0 #f)
+                (format-reg reg (second is-fp?))
+                fmt-props))))
 
 (define (format-instr/di op dst imm props)
-  (if (null? props)
-      (format "(~a ~a ~a)" op (format-reg dst) (format-imm imm 0 #f))
-      (format "(~a ~a ~a ~a)" op (format-reg dst) (format-imm imm 0 #f) (format-props props))))
+  (let ([fmt-props (format-props props)])
+    (if (equal? fmt-props "")
+        (format "(~a ~a ~a)" op (format-reg dst) (format-imm imm 0 #f))
+        (format "(~a ~a ~a ~a)" op (format-reg dst) (format-imm imm 0 #f) fmt-props))))
 
 (define (format-instr/dr op dst reg props [is-fp? '(#f #f)])
-  (if (null? props)
-      (format "(~a ~a ~a)" op (format-reg dst (first is-fp?)) (format-reg reg (second is-fp?)))
-      (format "(~a ~a ~a ~a)"
-              op
-              (format-reg dst (first is-fp?))
-              (format-reg reg (second is-fp?))
-              (format-props props))))
+  (let ([fmt-props (format-props props)])
+    (if (equal? fmt-props "")
+        (format "(~a ~a ~a)" op (format-reg dst (first is-fp?)) (format-reg reg (second is-fp?)))
+        (format "(~a ~a ~a ~a)"
+                op
+                (format-reg dst (first is-fp?))
+                (format-reg reg (second is-fp?))
+                fmt-props))))
 
 (define (format-instr/drr op dst r1 r2 props [is-fp? '(#f #f #f)])
-  (if (null? props)
-      (format "(~a ~a ~a ~a)"
-              op
-              (format-reg dst (first is-fp?))
-              (format-reg r1 (second is-fp?))
-              (format-reg r2 (third is-fp?)))
-      (format "(~a ~a ~a ~a ~a)"
-              op
-              (format-reg dst (first is-fp?))
-              (format-reg r1 (second is-fp?))
-              (format-reg r2 (third is-fp?))
-              (format-props props))))
+  (let ([fmt-props (format-props props)])
+    (if (equal? fmt-props "")
+        (format "(~a ~a ~a ~a)"
+                op
+                (format-reg dst (first is-fp?))
+                (format-reg r1 (second is-fp?))
+                (format-reg r2 (third is-fp?)))
+        (format "(~a ~a ~a ~a ~a)"
+                op
+                (format-reg dst (first is-fp?))
+                (format-reg r1 (second is-fp?))
+                (format-reg r2 (third is-fp?))
+                fmt-props))))
 
 (define (format-instr/d op dest)
   (format "(~a ~a)" op (format-reg dest)))
@@ -337,9 +343,9 @@
 (define (format-prop prop)
   (match prop
     [(zero/keep zk) (format "#:zk ~a" zk)]
-    [(shift s) (format "#:shift ~a" s)]
+    [(shift s) (if (> s 0) (format "#:shift ~a" s) "")]
     [(mov-type mt) (format "#:mov-type ~a" (vector-ref pb-mov-type-names mt))]
-    [(signal s) (format "#:signal ~a" (equal? s pb-signal))]))
+    [(signal s) (if (equal? s pb-signal) "#:signal #t" "")]))
 
 (define (format-zero/keep z/k)
   (match z/k
@@ -496,7 +502,7 @@
                                          (instr-drr-reg1 instr)
                                          (instr-drr-reg2 instr)
                                          '()
-                                         (list #f #f))]
+                                         (list fp #f #f))]
                       [(equal? drr/dri pb-immediate)
                        (format-instr/dri (format "ld-~a" (vector-ref pb-size-names sz))
                                          (instr-dri-dest instr)
@@ -592,6 +598,10 @@
 (define (decode/pb-interp-op instr)
   (format-instr/d "interp" (instr-d-dest instr)))
 
+(define (decode/pb-chunk-op instr)
+  (let ([outer-idx (instr-ii-high instr)] [inner-idx (instr-ii-low instr)])
+    (format "(pb-chunk #:outer-idx ~a #:inner-idx ~a)" outer-idx inner-idx)))
+
 ; Helpers for extracting components of a pb instruction. Taken from ChezScheme's pbchunk.ss
 
 (define (instr-op instr)
@@ -631,6 +641,12 @@
 
 (define (instr-i-imm instr)
   (arithmetic-shift instr -8))
+
+(define (instr-ii-low instr)
+  (bitwise-and (arithmetic-shift instr -8) #xFF))
+
+(define (instr-ii-high instr)
+  (bitwise-and (arithmetic-shift instr -16)))
 
 #|
 In Chez Scheme, the rp-header and rp-compact-header structures are defined as follows:
@@ -855,6 +871,8 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
     [(equal? (instr-op instr) pb-return) (decode/pb-return-op instr)]
     [(equal? (instr-op instr) pb-adr) (decode/pb-adr-op instr)]
     [(equal? (instr-op instr) pb-interp) (decode/pb-interp-op instr)]
+    [(equal? (instr-op instr) pb-chunk)
+     (error 'pb-disassemble "cannot continue disassembly in presence of pb-chunk")]
     [else (pb-print-skeleton-instr instr)]))
 
 ; A given pb machine has a word size (32 or 64 bit), an endianness, and may or may not
@@ -862,7 +880,7 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
 (struct pb-config ([bits] [endian] [threaded?]) #:transparent)
 
 (define (format-relocation name)
-  (format "(relocation ~a)" name))
+  (format "(relocation ~s)" name))
 
 (define (pad s len [p 32])
   (if (>= (string-length s) len)
@@ -890,7 +908,6 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
   (define word-size (native-word-size (pb-config-bits config)))
   (let-values ([(rp-headers labels) (collect-headers-labels bs config (bytes-length bs))])
     (let* ([labels-vec (list->vector labels)] [instr-length (pb-count-instrs bs)])
-
       (let loop ([i 0] [remaining-labels labels] [rs (reverse relocs)] [rps rp-headers])
         (cond
           [(equal? i (bytes-length bs)) (void)]
@@ -904,39 +921,47 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
                   [is-reloc? (and (pair? rs) (equal? i (+ (cdr (first rs)))))]
                   [is-rp-header? (and (pair? rps) (equal? i (caar rps)))])
 
+             (when (and is-label? is-rp-header?)
+               (error 'pb-disassemble "rp-header should not be branch target"))
+
              (when is-label?
+               (when is-rp-header?
+                 (error 'pb-disassemble "rp-header should not be branch target"))
                (display (format "\n.~a:\n" (label-name (car remaining-labels)))))
 
              ; rp headers are placeholders which Chez Scheme inserts into
              ; the instruction stream. They are non-instruction data and must
              ; be treated as such
              (if is-rp-header?
-                 (display (format "~a:\t~a\trp-header\n" (pad-index i) (pad-instr instr)))
-                 (display (format "~a:\t~a\t~a\n"
-                                  (pad-index i)
-                                  (pad-instr instr)
-                                  (disassemble instr idx labels-vec config))))
+                 (let ([rp-skip (- (cdar rps) pb-instruction-byte-size)])
+                   (display (format "~a:\t~a\trp-header\n" (pad-index i) (pad-instr instr)))
+                   (define remaining-rs
+                     (disassemble-data bs config (+ i pb-instruction-byte-size) rp-skip rs))
 
-             (let ([skip (cond
-                           ; literal instructions contain an extra
-                           ; data word after the instruction which
-                           ; must be skipped over
-                           [(equal? (instr-op instr) pb-literal) word-size]
+                   (loop (+ i pb-instruction-byte-size rp-skip)
+                         remaining-labels
+                         remaining-rs
+                         (cdr rps)))
+                 ;; otherwise, disassemble instruction as normal
+                 (begin
+                   (display (format "~a:\t~a\t~a\n"
+                                    (pad-index i)
+                                    (pad-instr instr)
+                                    (disassemble instr idx labels-vec config)))
 
-                           ; if the current instruction is at the start of an rp header,
-                           ; we must skip over a number of bytes equal to its size
-                           [is-rp-header? (- (cdar rps) pb-instruction-byte-size)]
-                           [else 0])])
+                   ; literal instructions contain an extra
+                   ; data word after the instruction which
+                   ; must be skipped over
+                   (let ([literal-skip (if (equal? (instr-op instr) pb-literal) word-size 0)])
+                     (define remaining-rs
+                       (if (> literal-skip 0)
+                           (disassemble-data bs config (+ i pb-instruction-byte-size) literal-skip rs)
+                           rs))
 
-               (define remaining-relocs
-                 (if (> skip 0)
-                     (disassemble-data bs config (+ i pb-instruction-byte-size) skip rs)
-                     rs))
-
-               (loop (+ i pb-instruction-byte-size skip)
-                     (if is-label? (cdr remaining-labels) remaining-labels)
-                     remaining-relocs
-                     (if is-rp-header? (cdr rps) rps))))])))))
+                     (loop (+ i pb-instruction-byte-size literal-skip)
+                           (if is-label? (cdr remaining-labels) remaining-labels)
+                           remaining-rs
+                           rps)))))])))))
 
 (define (pb-count-instrs bs)
   (unless (equal? (remainder (bytes-length bs) pb-instruction-byte-size) 0)
