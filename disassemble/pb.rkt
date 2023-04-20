@@ -10,9 +10,8 @@
 (define pb-nop 0)
 (define pb-literal 1)
 (define pb-mov-16-group-start 2)
-(define pb-mov-16-group-count 8)
-(define pb-mov-group-start 10)
 
+(define pb-mov-group-start 10)
 (define pb-binop-group-start 22)
 (define pb-cmp-group-start 74)
 (define pb-fp-binop-group-start 92)
@@ -340,14 +339,13 @@
 (struct mov-type [mt])
 (struct signal [s])
 
+
 (define (format-prop prop)
   (match prop
     [(zero/keep zk) (if (equal? zk keep-bits) "#:keep-bits #t" "")]
     [(shift s) (if (> s 0) (format "#:shift ~a" s) "")]
-    [(mov-type mt)
-     (if (not (member mt (list pb-i->i pb-d->d)))
-         (format "#:mov-type ~a" (vector-ref pb-mov-type-names mt))
-         "")]
+    [(mov-type mt) (if (not (member mt (list pb-i->i pb-d->d))) 
+      (format "#:mov-type ~a" (vector-ref pb-mov-type-names mt)) "")]
     [(signal s) (if (equal? s pb-signal) "#:signal #t" "")]))
 
 (define (format/pb-mov16 s zk reg imm)
@@ -404,7 +402,7 @@
       (format-instr/dr (vector-ref pb-fp-unop-names op-kind)
                        (instr-dr-dest instr)
                        (instr-dr-reg instr)
-                       '()
+                       '() 
                        '(#t #t))]
      [else (error 'pb-disassemble "floating-point instruction cannot have dri variant")])))
 
@@ -807,7 +805,7 @@ We have sizeof(rp-header) as 4*(word size). Similarly, sizeof(rp-compact-header)
   (cond
     [(in-range (instr-op instr)
                pb-mov-16-group-start
-               (+ pb-mov-16-group-start (sub1 pb-mov-16-group-count)))
+               (+ pb-mov-16-group-start (* (enum-field-count pb-zk) (enum-field-count pb-shift))))
      (decode/pb-mov16 instr)]
     [(in-range (instr-op instr)
                pb-mov-group-start
