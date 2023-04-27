@@ -1,6 +1,13 @@
 #lang racket
 (require racket/unsafe/ops "main.rkt")
 
+(define const-string "a constant string")
+
+(define (uses-const-string)
+  (display const-string))
+
+(void (decompile uses-const-string))
+
 (define (f x)
   (and x
        (for/fold () ([i (in-range 100)])

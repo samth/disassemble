@@ -1,9 +1,10 @@
 #lang racket/base
 
-(require racket/match ffi/unsafe racket/lazy-require
+(require racket/match racket/list ffi/unsafe racket/lazy-require
          version/utils racket/format
          (only-in machine-code/disassembler get-disassembler)
          (prefix-in fc: "fcdisasm.rkt")
+		 "pb.rkt"
          "vm.rkt")
 
 (lazy-require ("nasm.rkt" [nasm-disassemble]))
@@ -185,12 +186,36 @@
                                     [(regexp-match? #rx#"x86_64" sp) 'x86_64]
                                     [(regexp-match? #rx#"aarch64" sp) 'aarch64]
                                     [else sp]))])
-                 (system-type 'arch)))
-  (case arch
-    [(i386) 'x86-32]
-    [(x86_64) 'x86-64]
-    [(aarch64) 'arm-a64]
+
+    (let ([sys-target-type (system-type 'target-machine)])
+        ; first check target machine type in case we are targeting pb,
+        ; in which case (system-type 'arch) will return the underlying
+        ; machine arch and not the targeted pb variant
+            (if (pb-arch? (symbol->string sys-target-type))
+                sys-target-type
+                (system-type 'arch)))))
+  (cond
+    [(equal? arch 'i386) 'x86-32]
+    [(equal? arch 'x86_64) 'x86-64]
+    [(equal? arch 'aarch64) 'arm-a64]
+    [(pb-arch? (symbol->string arch)) arch]
     [else (error 'disassemble "unsupported architecture: ~s" arch)]))
+
+(define (pb-arch? arch)
+    (regexp-match? #rx#"^(t?)pb((?>32|64)?)((?>b|l)?)$" arch))
+
+(define (get-pb-config pb-arch)
+    (let ([parts (regexp-match #rx#"^(t?)pb((?>32|64)?)((?>b|l)?)$" pb-arch)])
+    (if parts
+        (let
+            ([t (second parts)]
+             [bits (third parts)]
+             [l (fourth parts)])
+            (pb-config
+                (if (equal? bits #"32") '32 '64)
+                (if (equal? l #"b") 'big 'little)
+                (not (equal? t #""))))
+        #f)))
 
 ;; #f for arch is "auto-detect"
 (define (disassemble f #:program [prog #f] #:arch [arch #f])
@@ -212,35 +237,40 @@
     (case prog
       [(nasm) (display (nasm-disassemble bs))]
       [else
-       (fc:disassemble (open-input-bytes bs)
-                       (get-disassembler arch)
-                       color #f 0 '()
-                       ;; Convert relocations to mutable-pair associations:
-                       (let loop ([relocations relocations])
-                         (if (null? relocations)
-                             '()
-                             (let ([p (car relocations)])
-                               (mcons (mcons (cdr p) (car p))
-                                      (loop (cdr relocations))))))
-                       ;; recognize instruction-pointer register:
-                       (case arch
-                         [(x86-32) (lambda (x) (eq? x 'eip))]
-                         [(x86-64) (lambda (x) (eq? x 'rip))]
-                         [(arm-a64) (lambda (x) (eq? x 'pc))]
-                         [else (error "ip recognizer missing")])
-                       ;; recognize unconditional jump instructions:
-                       (case arch
-                         [(x86-32 x86-64)
-                          (lambda (i)
-                            (memq (mcar i) '(jmp)))]
-                         [(arm-a64)
-                          (lambda (i)
-                            (memq (mcar i) '(b br)))]
-                         [else (error "jump recognizer missing")])
-                       ;; implicit delta on ip-relative calculations:
-                       (case arch
-                         [(arm-a64) -4]
-                         [else 0]))])))
+
+        (cond
+            [(pb-arch? (symbol->string arch))
+                (pb-disassemble bs (get-pb-config (symbol->string arch)) relocations)]
+            [else
+				(fc:disassemble (open-input-bytes bs)
+								(get-disassembler arch)
+								color #f 0 '()
+								;; Convert relocations to mutable-pair associations:
+                                (let loop ([relocations relocations])
+                                    (if (null? relocations)
+                                        '()
+                                        (let ([p (car relocations)])
+                                        (mcons (mcons (cdr p) (car p))
+                                                (loop (cdr relocations))))))
+								;; recognize instruction-pointer register:
+								(case arch
+									[(x86-32) (lambda (x) (eq? x 'eip))]
+									[(x86-64) (lambda (x) (eq? x 'rip))]
+									[(arm-a64) (lambda (x) (eq? x 'pc))]
+									[else (error "ip recognizer missing")])
+								;; recognize unconditional jump instructions:
+								(case arch
+									[(x86-32 x86-64)
+									(lambda (i)
+										(memq (mcar i) '(jmp)))]
+									[(arm-a64)
+									(lambda (i)
+										(memq (mcar i) '(b br)))]
+									[else (error "jump recognizer missing")])
+								;; implicit delta on ip-relative calculations:
+								(case arch
+									[(arm-a64) -4]
+									[else 0]))])])))
 
 (provide get-code-bytes)
 (define (get-code-bytes f) (go 'get-code-bytes f))
