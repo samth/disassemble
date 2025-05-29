@@ -7,3 +7,4 @@
                "srfi-lib"
                "srfi-lite-lib"))
 (define license 'MIT)
+(define scribblings '(("disassemble.scrbl")))

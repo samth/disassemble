@@ -10,7 +10,6 @@
 This document describes a Racket package for disassembling JIT-compiled Racket functions. It allows you to inspect the underlying machine code generated for your Racket procedures. The package primarily supports x86 and x86-64 architectures. Key functionalities include the `disassemble` procedure for viewing assembly and the `dump` procedure for writing raw machine code to a file. It can optionally use `nasm` for disassembly if available.
 
 @section{API Reference}
-@subsection{disassemble}
 
 @defproc[(disassemble [f procedure?]
                       [#:program prog (or/c #f 'nasm) #f]
@@ -22,7 +21,7 @@ This document describes a Racket package for disassembling JIT-compiled Racket f
   Use @racket[#:program 'nasm] to attempt to use the `ndisasm` utility for disassembly.
   If @racket[prog] is @racket[#f] (the default), an internal disassembler is used.
 
-  Use @racket[#:arch arch-sym] to specify the architecture (e.g., @racket['x86-64], @racket['x86-32]).
+  Use @racket[#:arch arch-sym] to specify the architecture (e.g., @racket['x86_64], @racket['i386], @racket['aarch64]).
   If @racket[arch-sym] is @racket[#f] (the default), the architecture is auto-detected.
 
   Example:
@@ -36,11 +35,7 @@ This document describes a Racket package for disassembling JIT-compiled Racket f
   ]
 }
 
-@subsection{decompile}
-
-This is an alias for @racket[disassemble]. See @secref["disassemble"] for details.
-
-@subsection{dump}
+This is an alias for the @racket[disassemble] procedure. See the documentation for @racket[disassemble] for details.
 
 @defproc[(dump [f procedure?]
                [file-name path-string?])
@@ -62,8 +57,6 @@ This is an alias for @racket[disassemble]. See @secref["disassemble"] for detail
   ]
 }
 
-@subsection{disassemble-bytes}
-
 @defproc[(disassemble-bytes [bs bytes?]
                             [#:arch arch (or/c #f symbol?) #f]
                             [#:program prog (or/c #f 'nasm) #f]
@@ -80,8 +73,6 @@ This is an alias for @racket[disassemble]. See @secref["disassemble"] for detail
   during disassembly. This is primarily for internal use or advanced scenarios.
 }
 
-@subsection{disassemble-ffi-function}
-
 @defproc[(disassemble-ffi-function [fptr cpointer?]
                                    [#:size s exact-nonnegative-integer?]
                                    [#:program prog (or/c #f 'nasm) #f]
@@ -97,8 +88,6 @@ This is an alias for @racket[disassemble]. See @secref["disassemble"] for detail
   Note: @racket[cpointer?] is a generic type for C pointers. Ensure the provided
   pointer is valid and points to executable code.
 }
-
-@subsection{get-code-bytes}
 
 @defproc[(get-code-bytes [f procedure?])
          bytes?]{
