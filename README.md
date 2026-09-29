@@ -52,6 +52,17 @@ file:
 > (dump const "file.bin")
 ```
 
+To run the expect-based test suite locally:
+
+```
+raco test tests/main.rkt
+```
+
+The tests use the `recspecs` library to compare disassembly output. If
+`ndisasm` is available, additional checks are run. GitHub Actions runs
+the suite on x64 with stable and current Racket CS and on arm64 with
+current Racket CS. The compiled-procedure tests run only on x86-64.
+
 Patches, uses, complaints, and suggestions are all welcome.
 
 The disassembly code (when not using NASM) is taken from Göran

@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, work ]
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            architecture: x64
+            racket-version: stable
+          - runner: ubuntu-24.04
+            architecture: x64
+            racket-version: current
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+            racket-version: current
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Bogdanp/setup-racket@v1.15
+        with:
+          architecture: ${{ matrix.architecture }}
+          distribution: full
+          variant: "CS"
+          version: ${{ matrix.racket-version }}
+          snapshot_site: utah
+      - name: Install package
+        run: raco pkg install --auto --no-docs
+      - name: Run tests
+        run: raco test tests/main.rkt
