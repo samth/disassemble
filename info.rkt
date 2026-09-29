@@ -6,5 +6,5 @@
                "r6rs-lib"
                "srfi-lib"
                "srfi-lite-lib"))
-(define build-deps '("rackunit-lib" "recspecs-lib"))
+(define build-deps '("at-exp-lib" "rackunit-lib" "recspecs-lib"))
 (define license 'MIT)
